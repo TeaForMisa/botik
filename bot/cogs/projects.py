@@ -27,17 +27,11 @@ class ProjectCreateModal(discord.ui.Modal, title="Новый проект"):
         style=discord.TextStyle.paragraph,
         max_length=1000,
     )
-    dimension = discord.ui.TextInput(
-        label="Измерение",
-        placeholder="Обычный мир / Незер / Энд",
+    location = discord.ui.TextInput(
+        label="Измерение и координаты",
+        placeholder="Обычный мир | 322 32 3",
         required=False,
-        max_length=50,
-    )
-    coordinates = discord.ui.TextInput(
-        label="Координаты",
-        placeholder="X Y Z или название сохранённого места",
-        required=False,
-        max_length=100,
+        max_length=150,
     )
     skills = discord.ui.TextInput(
         label="Кто нужен",
@@ -45,23 +39,43 @@ class ProjectCreateModal(discord.ui.Modal, title="Новый проект"):
         required=False,
         max_length=200,
     )
+    screenshot_field = discord.ui.Label(
+        text="Скриншот (необязательно)",
+        description="PNG, JPG, WEBP или GIF",
+        component=discord.ui.FileUpload(required=False, max_values=1),
+    )
 
     def __init__(
         self,
         bot: Any,
         guild_id: int,
         author_id: int,
-        screenshot: discord.Attachment | None = None,
     ) -> None:
         super().__init__()
         self.bot = bot
         self.guild_id = guild_id
         self.author_id = author_id
-        self.screenshot = screenshot
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
             return
+        screenshot_values = self.screenshot_field.component.values
+        screenshot = screenshot_values[0] if screenshot_values else None
+        if screenshot and not is_supported_image(screenshot):
+            await interaction.response.send_message(
+                "Скриншот должен быть в формате PNG, JPG, WEBP или GIF.",
+                ephemeral=True,
+            )
+            return
+
+        location = str(self.location).strip()
+        if "|" in location:
+            dimension, coordinates = (
+                part.strip() for part in location.split("|", maxsplit=1)
+            )
+        else:
+            dimension, coordinates = "", location
+
         settings = await self.bot.db.get_guild_settings(self.guild_id)
         if not settings:
             await interaction.response.send_message(
@@ -74,8 +88,8 @@ class ProjectCreateModal(discord.ui.Modal, title="Новый проект"):
             self.guild_id,
             str(self.name).strip(),
             str(self.description).strip(),
-            str(self.dimension).strip(),
-            str(self.coordinates).strip(),
+            dimension,
+            coordinates,
             str(self.skills).strip(),
             self.author_id,
         )
@@ -96,9 +110,9 @@ class ProjectCreateModal(discord.ui.Modal, title="Новый проект"):
                 "view": view,
                 "allowed_mentions": discord.AllowedMentions.none(),
             }
-            if self.screenshot:
-                filename = image_filename("project", project_id, self.screenshot)
-                send_options["file"] = await self.screenshot.to_file(
+            if screenshot:
+                filename = image_filename("project", project_id, screenshot)
+                send_options["file"] = await screenshot.to_file(
                     filename=filename,
                     description=f"Скриншот проекта {self.name}",
                 )
@@ -155,12 +169,7 @@ class ProjectsCog(commands.GroupCog, group_name="project", group_description="П
         self.bot = bot
 
     @app_commands.command(name="create", description="Создать совместный проект")
-    @app_commands.describe(screenshot="Необязательный скриншот проекта")
-    async def create(
-        self,
-        interaction: discord.Interaction,
-        screenshot: discord.Attachment | None = None,
-    ) -> None:
+    async def create(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
             return
         settings = await self.bot.db.get_guild_settings(interaction.guild.id)
@@ -169,18 +178,11 @@ class ProjectsCog(commands.GroupCog, group_name="project", group_description="П
                 "Сначала руководство должно выполнить `/setup`.", ephemeral=True
             )
             return
-        if screenshot and not is_supported_image(screenshot):
-            await interaction.response.send_message(
-                "Скриншот должен быть в формате PNG, JPG, WEBP или GIF.",
-                ephemeral=True,
-            )
-            return
         await interaction.response.send_modal(
             ProjectCreateModal(
                 self.bot,
                 interaction.guild.id,
                 interaction.user.id,
-                screenshot,
             )
         )
 

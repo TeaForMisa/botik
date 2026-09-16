@@ -4,8 +4,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from bot.cogs.places import PlacesCog
-from bot.cogs.projects import ProjectsCog
+import discord
+
+from bot.cogs.places import PlaceCreateModal, PlacesCog
+from bot.cogs.projects import ProjectCreateModal, ProjectsCog
 from bot.cogs.setup import SetupCog
 from bot.config import Settings
 from bot.views import ProjectView
@@ -43,13 +45,19 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         place_add = next(
             command for command in commands["place"].commands if command.name == "add"
         )
-        self.assertEqual([parameter.name for parameter in project_create.parameters], ["screenshot"])
-        self.assertEqual(
-            [parameter.name for parameter in place_add.parameters],
-            ["visibility", "screenshot"],
-        )
-        self.assertFalse(project_create.parameters[0].required)
-        self.assertFalse(place_add.parameters[1].required)
+        self.assertEqual(project_create.parameters, [])
+        self.assertEqual([parameter.name for parameter in place_add.parameters], ["visibility"])
+
+    async def test_create_forms_contain_optional_file_upload(self) -> None:
+        project_modal = ProjectCreateModal(self.bot, 10, 20)
+        place_modal = PlaceCreateModal(self.bot, 10, 20, "clan")
+
+        self.assertEqual(len(project_modal.children), 5)
+        self.assertEqual(len(place_modal.children), 5)
+        self.assertIsInstance(project_modal.screenshot_field.component, discord.ui.FileUpload)
+        self.assertIsInstance(place_modal.screenshot_field.component, discord.ui.FileUpload)
+        self.assertFalse(project_modal.screenshot_field.component.required)
+        self.assertFalse(place_modal.screenshot_field.component.required)
 
     async def test_project_view_is_persistent(self) -> None:
         view = ProjectView(self.bot, 42)
