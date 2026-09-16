@@ -7,7 +7,13 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from bot.common import is_leadership, place_embed, send_audit
+from bot.common import (
+    image_filename,
+    is_leadership,
+    is_supported_image,
+    place_embed,
+    send_audit,
+)
 
 
 VISIBILITY_LABELS = {
@@ -51,12 +57,20 @@ class PlaceCreateModal(discord.ui.Modal, title="Добавить место"):
         max_length=500,
     )
 
-    def __init__(self, bot: Any, guild_id: int, author_id: int, visibility: str) -> None:
+    def __init__(
+        self,
+        bot: Any,
+        guild_id: int,
+        author_id: int,
+        visibility: str,
+        screenshot: discord.Attachment | None = None,
+    ) -> None:
         super().__init__()
         self.bot = bot
         self.guild_id = guild_id
         self.author_id = author_id
         self.visibility = visibility
+        self.screenshot = screenshot
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
@@ -88,6 +102,7 @@ class PlaceCreateModal(discord.ui.Modal, title="Добавить место"):
             str(self.category).strip(),
             self.visibility,
             self.author_id,
+            self.screenshot.url if self.screenshot else "",
         )
         place = await self.bot.db.get_place(place_id)
         settings = await self.bot.db.get_guild_settings(self.guild_id)
@@ -97,12 +112,27 @@ class PlaceCreateModal(discord.ui.Modal, title="Добавить место"):
             channel = interaction.guild.get_channel(settings["places_channel_id"])
             if isinstance(channel, discord.TextChannel):
                 try:
+                    embed = place_embed(place)
+                    send_options: dict[str, Any] = {
+                        "embed": embed,
+                        "allowed_mentions": discord.AllowedMentions.none(),
+                    }
+                    if self.screenshot:
+                        filename = image_filename("place", place_id, self.screenshot)
+                        send_options["file"] = await self.screenshot.to_file(
+                            filename=filename,
+                            description=f"Скриншот места {self.name}",
+                        )
+                        embed.set_image(url=f"attachment://{filename}")
                     message = await channel.send(
-                        embed=place_embed(place),
-                        allowed_mentions=discord.AllowedMentions.none(),
+                        **send_options,
                     )
                     jump_url = message.jump_url
-                except discord.HTTPException:
+                    if message.attachments:
+                        await self.bot.db.set_place_image(
+                            place_id, message.attachments[0].url
+                        )
+                except (discord.Forbidden, discord.HTTPException):
                     pass
 
         await send_audit(
@@ -218,7 +248,10 @@ class PlacesCog(commands.GroupCog, group_name="place", group_description="Коо
         self.bot = bot
 
     @app_commands.command(name="add", description="Сохранить новое место")
-    @app_commands.describe(visibility="Кто сможет найти и увидеть координаты")
+    @app_commands.describe(
+        visibility="Кто сможет найти и увидеть координаты",
+        screenshot="Необязательный скриншот места",
+    )
     @app_commands.choices(
         visibility=[
             app_commands.Choice(name="Весь клан", value="clan"),
@@ -230,6 +263,7 @@ class PlacesCog(commands.GroupCog, group_name="place", group_description="Коо
         self,
         interaction: discord.Interaction,
         visibility: app_commands.Choice[str] | None = None,
+        screenshot: discord.Attachment | None = None,
     ) -> None:
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
             return
@@ -245,12 +279,19 @@ class PlacesCog(commands.GroupCog, group_name="place", group_description="Коо
                 "Места для руководства может добавлять только руководство.", ephemeral=True
             )
             return
+        if screenshot and not is_supported_image(screenshot):
+            await interaction.response.send_message(
+                "Скриншот должен быть в формате PNG, JPG, WEBP или GIF.",
+                ephemeral=True,
+            )
+            return
         await interaction.response.send_modal(
             PlaceCreateModal(
                 self.bot,
                 interaction.guild.id,
                 interaction.user.id,
                 visibility_value,
+                screenshot,
             )
         )
 
@@ -346,4 +387,3 @@ class PlacesCog(commands.GroupCog, group_name="place", group_description="Коо
 
 async def setup(bot: Any) -> None:
     await bot.add_cog(PlacesCog(bot))
-

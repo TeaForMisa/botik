@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS projects (
     status TEXT NOT NULL DEFAULT 'idea',
     channel_id INTEGER,
     message_id INTEGER,
+    image_url TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -59,6 +60,7 @@ CREATE TABLE IF NOT EXISTS places (
     visibility TEXT NOT NULL DEFAULT 'clan'
         CHECK (visibility IN ('clan', 'leadership', 'author')),
     author_id INTEGER NOT NULL,
+    image_url TEXT,
     is_deleted INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted_at TEXT
@@ -93,7 +95,14 @@ class Database:
         await self.connection.execute("PRAGMA foreign_keys = ON")
         await self.connection.execute("PRAGMA busy_timeout = 5000")
         await self.connection.executescript(SCHEMA)
+        await self._ensure_column("projects", "image_url", "TEXT")
+        await self._ensure_column("places", "image_url", "TEXT")
         await self.connection.commit()
+
+    async def _ensure_column(self, table: str, column: str, definition: str) -> None:
+        rows = await self.fetchall(f"PRAGMA table_info({table})")
+        if not any(row["name"] == column for row in rows):
+            await self.db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     async def close(self) -> None:
         if self.connection is not None:
@@ -178,15 +187,20 @@ class Database:
         )
 
     async def set_project_message(
-        self, project_id: int, channel_id: int, message_id: int
+        self,
+        project_id: int,
+        channel_id: int,
+        message_id: int,
+        image_url: str = "",
     ) -> None:
         await self.execute(
             """
             UPDATE projects
-            SET channel_id = ?, message_id = ?, updated_at = CURRENT_TIMESTAMP
+            SET channel_id = ?, message_id = ?, image_url = ?,
+                updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
-            (channel_id, message_id, project_id),
+            (channel_id, message_id, image_url or None, project_id),
         )
 
     async def delete_project_draft(self, project_id: int) -> None:
@@ -262,13 +276,14 @@ class Database:
         category: str,
         visibility: str,
         author_id: int,
+        image_url: str = "",
     ) -> int:
         return await self.execute(
             """
             INSERT INTO places (
                 guild_id, name, dimension, x, y, z, description,
-                category, visibility, author_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                category, visibility, author_id, image_url
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 guild_id,
@@ -281,7 +296,13 @@ class Database:
                 category,
                 visibility,
                 author_id,
+                image_url or None,
             ),
+        )
+
+    async def set_place_image(self, place_id: int, image_url: str) -> None:
+        await self.execute(
+            "UPDATE places SET image_url = ? WHERE id = ?", (image_url, place_id)
         )
 
     async def get_place(self, place_id: int) -> aiosqlite.Row | None:

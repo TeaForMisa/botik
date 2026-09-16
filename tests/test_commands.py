@@ -37,6 +37,20 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(project_commands, {"create", "list"})
         self.assertEqual(place_commands, {"add", "find", "list", "delete", "restore"})
 
+        project_create = next(
+            command for command in commands["project"].commands if command.name == "create"
+        )
+        place_add = next(
+            command for command in commands["place"].commands if command.name == "add"
+        )
+        self.assertEqual([parameter.name for parameter in project_create.parameters], ["screenshot"])
+        self.assertEqual(
+            [parameter.name for parameter in place_add.parameters],
+            ["visibility", "screenshot"],
+        )
+        self.assertFalse(project_create.parameters[0].required)
+        self.assertFalse(place_add.parameters[1].required)
+
     async def test_project_view_is_persistent(self) -> None:
         view = ProjectView(self.bot, 42)
         self.assertTrue(view.is_persistent())
@@ -54,4 +68,3 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

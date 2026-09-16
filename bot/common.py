@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import PurePath
 from typing import Any
 
 import discord
@@ -13,6 +14,20 @@ PROJECT_STATUSES = {
     "paused": "⏸️ Приостановлен",
     "completed": "✅ Завершён",
 }
+
+SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+
+
+def is_supported_image(attachment: discord.Attachment) -> bool:
+    suffix = PurePath(attachment.filename).suffix.lower()
+    if suffix not in SUPPORTED_IMAGE_EXTENSIONS:
+        return False
+    return attachment.content_type is None or attachment.content_type.startswith("image/")
+
+
+def image_filename(prefix: str, object_id: int, attachment: discord.Attachment) -> str:
+    suffix = PurePath(attachment.filename).suffix.lower()
+    return f"{prefix}-{object_id}{suffix}"
 
 
 async def is_leadership(bot: Any, member: discord.Member) -> bool:
@@ -87,6 +102,8 @@ def project_embed(project: Any, members: list[Any]) -> discord.Embed:
     else:
         value = "Пока никто не присоединился"
     embed.add_field(name=f"Участники ({len(members)})", value=value[:1024], inline=False)
+    if project["image_url"]:
+        embed.set_image(url=project["image_url"])
     embed.set_footer(text=f"Проект #{project['id']}")
     return embed
 
@@ -108,6 +125,8 @@ def place_embed(place: Any, *, hide_coordinates: bool = False) -> discord.Embed:
     embed.add_field(name="Категория", value=place["category"])
     embed.add_field(name="Доступ", value=visibility)
     embed.add_field(name="Добавил", value=f"<@{place['author_id']}>")
+    if place["image_url"]:
+        embed.set_image(url=place["image_url"])
     embed.set_footer(text=f"Место #{place['id']}")
     return embed
 

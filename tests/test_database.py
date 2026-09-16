@@ -45,7 +45,49 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         await self.db.restore_place(place_id)
         self.assertEqual(len(await self.db.find_places(10)), 1)
 
+    async def test_image_urls_are_saved(self) -> None:
+        project_id = await self.db.create_project(
+            10, "Порт", "Морской порт", "Обычный мир", "10 65 20", "Строители", 42
+        )
+        await self.db.set_project_message(
+            project_id, 100, 200, "https://cdn.example/project.png"
+        )
+        project = await self.db.get_project(project_id)
+        self.assertEqual(project["image_url"], "https://cdn.example/project.png")
+
+        place_id = await self.db.create_place(
+            10,
+            "Порт",
+            "Обычный мир",
+            10,
+            65,
+            20,
+            "Причал",
+            "Город",
+            "clan",
+            42,
+            "https://cdn.example/place.png",
+        )
+        place = await self.db.get_place(place_id)
+        self.assertEqual(place["image_url"], "https://cdn.example/place.png")
+
+    async def test_existing_database_gets_image_columns(self) -> None:
+        await self.db.execute("ALTER TABLE projects DROP COLUMN image_url")
+        await self.db.execute("ALTER TABLE places DROP COLUMN image_url")
+        await self.db.close()
+
+        self.db = Database(Path(self.temp_dir.name) / "test.db")
+        await self.db.initialize()
+
+        project_columns = {
+            row["name"] for row in await self.db.fetchall("PRAGMA table_info(projects)")
+        }
+        place_columns = {
+            row["name"] for row in await self.db.fetchall("PRAGMA table_info(places)")
+        }
+        self.assertIn("image_url", project_columns)
+        self.assertIn("image_url", place_columns)
+
 
 if __name__ == "__main__":
     unittest.main()
-

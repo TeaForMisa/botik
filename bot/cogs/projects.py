@@ -6,7 +6,13 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from bot.common import PROJECT_STATUSES, project_embed, send_audit
+from bot.common import (
+    PROJECT_STATUSES,
+    image_filename,
+    is_supported_image,
+    project_embed,
+    send_audit,
+)
 from bot.views import ProjectView
 
 
@@ -40,11 +46,18 @@ class ProjectCreateModal(discord.ui.Modal, title="Новый проект"):
         max_length=200,
     )
 
-    def __init__(self, bot: Any, guild_id: int, author_id: int) -> None:
+    def __init__(
+        self,
+        bot: Any,
+        guild_id: int,
+        author_id: int,
+        screenshot: discord.Attachment | None = None,
+    ) -> None:
         super().__init__()
         self.bot = bot
         self.guild_id = guild_id
         self.author_id = author_id
+        self.screenshot = screenshot
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
@@ -78,13 +91,24 @@ class ProjectCreateModal(discord.ui.Modal, title="Новый проект"):
                 channel = None
 
         try:
+            send_options: dict[str, Any] = {
+                "embed": embed,
+                "view": view,
+                "allowed_mentions": discord.AllowedMentions.none(),
+            }
+            if self.screenshot:
+                filename = image_filename("project", project_id, self.screenshot)
+                send_options["file"] = await self.screenshot.to_file(
+                    filename=filename,
+                    description=f"Скриншот проекта {self.name}",
+                )
+                embed.set_image(url=f"attachment://{filename}")
+
             if isinstance(channel, discord.ForumChannel):
                 created = await channel.create_thread(
                     name=str(self.name)[:100],
                     content="Карточка проекта",
-                    embed=embed,
-                    view=view,
-                    allowed_mentions=discord.AllowedMentions.none(),
+                    **send_options,
                 )
                 message = created.message
             elif isinstance(channel, discord.TextChannel):
@@ -92,11 +116,7 @@ class ProjectCreateModal(discord.ui.Modal, title="Новый проект"):
                     name=str(self.name)[:100],
                     type=discord.ChannelType.public_thread,
                 )
-                message = await thread.send(
-                    embed=embed,
-                    view=view,
-                    allowed_mentions=discord.AllowedMentions.none(),
-                )
+                message = await thread.send(**send_options)
             else:
                 raise RuntimeError("Канал проектов недоступен")
         except (discord.Forbidden, discord.HTTPException, RuntimeError) as error:
@@ -108,7 +128,13 @@ class ProjectCreateModal(discord.ui.Modal, title="Новый проект"):
             )
             return
 
-        await self.bot.db.set_project_message(project_id, message.channel.id, message.id)
+        uploaded_image_url = message.attachments[0].url if message.attachments else ""
+        await self.bot.db.set_project_message(
+            project_id,
+            message.channel.id,
+            message.id,
+            uploaded_image_url,
+        )
         await send_audit(
             self.bot,
             interaction.guild,
@@ -129,7 +155,12 @@ class ProjectsCog(commands.GroupCog, group_name="project", group_description="П
         self.bot = bot
 
     @app_commands.command(name="create", description="Создать совместный проект")
-    async def create(self, interaction: discord.Interaction) -> None:
+    @app_commands.describe(screenshot="Необязательный скриншот проекта")
+    async def create(
+        self,
+        interaction: discord.Interaction,
+        screenshot: discord.Attachment | None = None,
+    ) -> None:
         if not interaction.guild:
             return
         settings = await self.bot.db.get_guild_settings(interaction.guild.id)
@@ -138,8 +169,19 @@ class ProjectsCog(commands.GroupCog, group_name="project", group_description="П
                 "Сначала руководство должно выполнить `/setup`.", ephemeral=True
             )
             return
+        if screenshot and not is_supported_image(screenshot):
+            await interaction.response.send_message(
+                "Скриншот должен быть в формате PNG, JPG, WEBP или GIF.",
+                ephemeral=True,
+            )
+            return
         await interaction.response.send_modal(
-            ProjectCreateModal(self.bot, interaction.guild.id, interaction.user.id)
+            ProjectCreateModal(
+                self.bot,
+                interaction.guild.id,
+                interaction.user.id,
+                screenshot,
+            )
         )
 
     @app_commands.command(name="list", description="Показать активные проекты")
