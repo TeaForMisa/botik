@@ -8,6 +8,8 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.common import (
+    bot_access_check,
+    component_access_check,
     image_filename,
     is_leadership,
     is_supported_image,
@@ -169,8 +171,9 @@ class PlaceCreateModal(discord.ui.Modal, title="Добавить место"):
 
 
 class PlaceResultsView(discord.ui.View):
-    def __init__(self, requester_id: int, places: list[Any]) -> None:
+    def __init__(self, bot: Any, requester_id: int, places: list[Any]) -> None:
         super().__init__(timeout=180)
+        self.bot = bot
         self.requester_id = requester_id
         self.places = places
         self.page = 0
@@ -203,6 +206,8 @@ class PlaceResultsView(discord.ui.View):
         return embed
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if not await component_access_check(self.bot, interaction):
+            return False
         if interaction.user.id != self.requester_id:
             await interaction.response.send_message(
                 "Эти кнопки относятся к поиску другого участника.", ephemeral=True
@@ -231,7 +236,10 @@ class DeletePlaceView(discord.ui.View):
         self.requester_id = requester_id
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.requester_id
+        return (
+            await component_access_check(self.bot, interaction)
+            and interaction.user.id == self.requester_id
+        )
 
     @discord.ui.button(label="Удалить", style=discord.ButtonStyle.danger)
     async def confirm(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
@@ -265,6 +273,7 @@ class PlacesCog(commands.GroupCog, group_name="place", group_description="Коо
         self.bot = bot
 
     @app_commands.command(name="add", description="Сохранить новое место")
+    @bot_access_check()
     @app_commands.describe(
         visibility="Кто сможет найти и увидеть координаты",
     )
@@ -321,10 +330,11 @@ class PlacesCog(commands.GroupCog, group_name="place", group_description="Коо
         if not visible:
             await interaction.response.send_message("Подходящих мест не найдено.", ephemeral=True)
             return
-        view = PlaceResultsView(interaction.user.id, visible)
+        view = PlaceResultsView(self.bot, interaction.user.id, visible)
         await interaction.response.send_message(embed=view.render(), view=view, ephemeral=True)
 
     @app_commands.command(name="find", description="Найти место по названию или фильтрам")
+    @bot_access_check()
     @app_commands.describe(
         query="Часть названия",
         category="Категория, например ферма",
@@ -340,10 +350,12 @@ class PlacesCog(commands.GroupCog, group_name="place", group_description="Коо
         await self._show_results(interaction, query, category, dimension)
 
     @app_commands.command(name="list", description="Показать все доступные места")
+    @bot_access_check()
     async def list_places(self, interaction: discord.Interaction) -> None:
         await self._show_results(interaction)
 
     @app_commands.command(name="delete", description="Удалить своё место")
+    @bot_access_check()
     async def delete(self, interaction: discord.Interaction, place_id: int) -> None:
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
             return
@@ -366,6 +378,7 @@ class PlacesCog(commands.GroupCog, group_name="place", group_description="Коо
         )
 
     @app_commands.command(name="restore", description="Восстановить удалённое место")
+    @bot_access_check()
     async def restore(self, interaction: discord.Interaction, place_id: int) -> None:
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
             return

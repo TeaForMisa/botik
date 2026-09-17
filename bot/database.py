@@ -19,6 +19,19 @@ CREATE TABLE IF NOT EXISTS guild_settings (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS guild_role_access (
+    guild_id INTEGER NOT NULL,
+    role_id INTEGER NOT NULL,
+    access_level TEXT NOT NULL
+        CHECK (access_level IN ('blocked', 'member', 'admin')),
+    updated_by INTEGER NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (guild_id, role_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_guild_role_access_guild
+ON guild_role_access(guild_id);
+
 CREATE TABLE IF NOT EXISTS projects (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     guild_id INTEGER NOT NULL,
@@ -164,6 +177,43 @@ class Database:
     async def get_guild_settings(self, guild_id: int) -> aiosqlite.Row | None:
         return await self.fetchone(
             "SELECT * FROM guild_settings WHERE guild_id = ?", (guild_id,)
+        )
+
+    async def set_role_access(
+        self,
+        guild_id: int,
+        role_id: int,
+        access_level: str,
+        updated_by: int,
+    ) -> None:
+        await self.execute(
+            """
+            INSERT INTO guild_role_access (
+                guild_id, role_id, access_level, updated_by
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT(guild_id, role_id) DO UPDATE SET
+                access_level = excluded.access_level,
+                updated_by = excluded.updated_by,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (guild_id, role_id, access_level, updated_by),
+        )
+
+    async def remove_role_access(self, guild_id: int, role_id: int) -> None:
+        await self.execute(
+            "DELETE FROM guild_role_access WHERE guild_id = ? AND role_id = ?",
+            (guild_id, role_id),
+        )
+
+    async def get_role_access_rules(self, guild_id: int) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            """
+            SELECT role_id, access_level, updated_by, updated_at
+            FROM guild_role_access
+            WHERE guild_id = ?
+            ORDER BY role_id
+            """,
+            (guild_id,),
         )
 
     async def create_project(

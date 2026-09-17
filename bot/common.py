@@ -5,6 +5,7 @@ from pathlib import PurePath
 from typing import Any
 
 import discord
+from discord import app_commands
 
 
 PROJECT_STATUSES = {
@@ -16,6 +17,73 @@ PROJECT_STATUSES = {
 }
 
 SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+
+ACCESS_LEVELS = {
+    "blocked": "⛔ Запрещено",
+    "member": "👤 Основные команды",
+    "admin": "🛡️ Администратор бота",
+}
+
+
+class BotAccessDenied(app_commands.CheckFailure):
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
+async def get_member_access(bot: Any, member: discord.Member) -> str:
+    if (
+        member.id == member.guild.owner_id
+        or member.guild_permissions.administrator
+        or member.guild_permissions.manage_guild
+    ):
+        return "admin"
+
+    rules = await bot.db.get_role_access_rules(member.guild.id)
+    levels_by_role = {row["role_id"]: row["access_level"] for row in rules}
+    for role in reversed(member.roles):
+        if role.id in levels_by_role:
+            return levels_by_role[role.id]
+    return "member"
+
+
+async def require_access(
+    bot: Any,
+    interaction: discord.Interaction,
+    *,
+    admin: bool = False,
+) -> bool:
+    if not interaction.guild or not isinstance(interaction.user, discord.Member):
+        raise BotAccessDenied("Эта команда доступна только на сервере.")
+    level = await get_member_access(bot, interaction.user)
+    if level == "blocked":
+        raise BotAccessDenied("Ваша роль не может использовать этого бота.")
+    if admin and level != "admin":
+        raise BotAccessDenied("Эта команда доступна только администраторам бота.")
+    return True
+
+
+def bot_access_check(*, admin: bool = False) -> Any:
+    async def predicate(interaction: discord.Interaction) -> bool:
+        return await require_access(interaction.client, interaction, admin=admin)
+
+    return app_commands.check(predicate)
+
+
+async def component_access_check(
+    bot: Any,
+    interaction: discord.Interaction,
+    *,
+    admin: bool = False,
+) -> bool:
+    try:
+        return await require_access(bot, interaction, admin=admin)
+    except BotAccessDenied as error:
+        if interaction.response.is_done():
+            await interaction.followup.send(error.message, ephemeral=True)
+        else:
+            await interaction.response.send_message(error.message, ephemeral=True)
+        return False
 
 
 def is_supported_image(attachment: discord.Attachment) -> bool:
@@ -31,7 +99,7 @@ def image_filename(prefix: str, object_id: int, attachment: discord.Attachment) 
 
 
 async def is_leadership(bot: Any, member: discord.Member) -> bool:
-    if member.guild_permissions.administrator or member.guild_permissions.manage_guild:
+    if await get_member_access(bot, member) == "admin":
         return True
     settings = await bot.db.get_guild_settings(member.guild.id)
     if not settings or not settings["leadership_role_id"]:

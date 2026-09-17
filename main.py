@@ -6,6 +6,7 @@ import logging
 import discord
 from discord.ext import commands
 
+from bot.common import BotAccessDenied
 from bot.config import Settings
 from bot.database import Database
 from bot.views import ProjectView
@@ -21,11 +22,13 @@ class ClanBot(commands.Bot):
     async def setup_hook(self) -> None:
         await self.db.initialize()
 
+        from bot.cogs.access import AccessCog
         from bot.cogs.places import PlacesCog
         from bot.cogs.projects import ProjectsCog
         from bot.cogs.setup import SetupCog
 
         await self.add_cog(SetupCog(self))
+        await self.add_cog(AccessCog(self))
         await self.add_cog(ProjectsCog(self))
         await self.add_cog(PlacesCog(self))
 
@@ -63,8 +66,11 @@ async def run() -> None:
         interaction: discord.Interaction,
         error: discord.app_commands.AppCommandError,
     ) -> None:
-        logging.exception("Ошибка slash-команды", exc_info=error)
-        text = "Произошла ошибка. Подробности сохранены в журнале бота."
+        if isinstance(error, BotAccessDenied):
+            text = error.message
+        else:
+            logging.exception("Ошибка slash-команды", exc_info=error)
+            text = "Произошла ошибка. Подробности сохранены в журнале бота."
         if interaction.response.is_done():
             await interaction.followup.send(text, ephemeral=True)
         else:
@@ -80,4 +86,3 @@ if __name__ == "__main__":
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
     asyncio.run(run())
-

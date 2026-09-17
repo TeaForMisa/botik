@@ -6,6 +6,7 @@ from pathlib import Path
 
 import discord
 
+from bot.cogs.access import AccessCog
 from bot.cogs.places import PlaceCreateModal, PlacesCog
 from bot.cogs.projects import ProjectCreateModal, ProjectsCog
 from bot.cogs.setup import SetupCog
@@ -20,6 +21,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         settings = Settings("test-token", Path(self.temp_dir.name) / "test.db", None)
         self.bot = ClanBot(settings)
         await self.bot.add_cog(SetupCog(self.bot))
+        await self.bot.add_cog(AccessCog(self.bot))
         await self.bot.add_cog(ProjectsCog(self.bot))
         await self.bot.add_cog(PlacesCog(self.bot))
 
@@ -31,6 +33,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         commands = {command.name: command for command in self.bot.tree.get_commands()}
         self.assertIn("setup", commands)
         self.assertIn("bot-status", commands)
+        self.assertIn("access", commands)
         self.assertIn("project", commands)
         self.assertIn("place", commands)
 
@@ -38,6 +41,8 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         place_commands = {command.name for command in commands["place"].commands}
         self.assertEqual(project_commands, {"create", "list"})
         self.assertEqual(place_commands, {"add", "find", "list", "delete", "restore"})
+        access_commands = {command.name for command in commands["access"].commands}
+        self.assertEqual(access_commands, {"set", "remove", "list"})
 
         project_create = next(
             command for command in commands["project"].commands if command.name == "create"

@@ -7,6 +7,7 @@ import discord
 from bot.common import (
     PROJECT_STATUSES,
     can_manage_project,
+    component_access_check,
     refresh_project_message,
     send_audit,
 )
@@ -52,7 +53,11 @@ class ProjectRoleSelect(discord.ui.Select):
 class ProjectRoleView(discord.ui.View):
     def __init__(self, bot: Any, project_id: int) -> None:
         super().__init__(timeout=120)
+        self.bot = bot
         self.add_item(ProjectRoleSelect(bot, project_id))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await component_access_check(self.bot, interaction)
 
 
 class ProjectStatusSelect(discord.ui.Select):
@@ -97,7 +102,11 @@ class ProjectStatusSelect(discord.ui.Select):
 class ProjectStatusView(discord.ui.View):
     def __init__(self, bot: Any, project_id: int) -> None:
         super().__init__(timeout=120)
+        self.bot = bot
         self.add_item(ProjectStatusSelect(bot, project_id))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await component_access_check(self.bot, interaction)
 
 
 class ProjectView(discord.ui.View):
@@ -139,6 +148,8 @@ class ProjectView(discord.ui.View):
         self.add_item(status)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if not await component_access_check(self.bot, interaction):
+            return False
         project = await self.bot.db.get_project(self.project_id)
         if not project or not interaction.guild or project["guild_id"] != interaction.guild.id:
             await interaction.response.send_message("Этот проект больше недоступен.", ephemeral=True)
@@ -195,4 +206,3 @@ class ProjectView(discord.ui.View):
             view=ProjectStatusView(self.bot, self.project_id),
             ephemeral=True,
         )
-

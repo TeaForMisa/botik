@@ -8,6 +8,7 @@ from discord.ext import commands
 
 from bot.common import (
     PROJECT_STATUSES,
+    bot_access_check,
     image_filename,
     is_supported_image,
     project_embed,
@@ -169,6 +170,7 @@ class ProjectsCog(commands.GroupCog, group_name="project", group_description="П
         self.bot = bot
 
     @app_commands.command(name="create", description="Создать совместный проект")
+    @bot_access_check()
     async def create(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
             return
@@ -187,6 +189,7 @@ class ProjectsCog(commands.GroupCog, group_name="project", group_description="П
         )
 
     @app_commands.command(name="list", description="Показать активные проекты")
+    @bot_access_check()
     async def list_projects(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
             return

@@ -3,7 +3,9 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
+from bot.common import get_member_access
 from bot.database import Database
 
 
@@ -87,6 +89,45 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         }
         self.assertIn("image_url", project_columns)
         self.assertIn("image_url", place_columns)
+
+    async def test_role_access_rules_and_highest_role_priority(self) -> None:
+        await self.db.set_role_access(10, 1, "blocked", 42)
+        await self.db.set_role_access(10, 2, "member", 42)
+        await self.db.set_role_access(10, 3, "admin", 42)
+
+        rules = await self.db.get_role_access_rules(10)
+        self.assertEqual(
+            {row["role_id"]: row["access_level"] for row in rules},
+            {1: "blocked", 2: "member", 3: "admin"},
+        )
+
+        guild = SimpleNamespace(id=10, owner_id=999)
+        permissions = SimpleNamespace(administrator=False, manage_guild=False)
+        bot = SimpleNamespace(db=self.db)
+        member = SimpleNamespace(
+            id=50,
+            guild=guild,
+            guild_permissions=permissions,
+            roles=[SimpleNamespace(id=1), SimpleNamespace(id=2)],
+        )
+        self.assertEqual(await get_member_access(bot, member), "member")
+
+        member.roles = [SimpleNamespace(id=1)]
+        self.assertEqual(await get_member_access(bot, member), "blocked")
+
+        member.roles = [SimpleNamespace(id=99)]
+        self.assertEqual(await get_member_access(bot, member), "member")
+
+        member.roles = [SimpleNamespace(id=1), SimpleNamespace(id=2)]
+        member.roles.append(SimpleNamespace(id=3))
+        self.assertEqual(await get_member_access(bot, member), "admin")
+
+        await self.db.remove_role_access(10, 3)
+        self.assertEqual(await get_member_access(bot, member), "member")
+
+        member.guild_permissions.manage_guild = True
+        member.roles = [SimpleNamespace(id=1)]
+        self.assertEqual(await get_member_access(bot, member), "admin")
 
 
 if __name__ == "__main__":
