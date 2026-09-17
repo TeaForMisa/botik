@@ -201,7 +201,7 @@ def place_embed(place: Any, *, hide_coordinates: bool = False) -> discord.Embed:
     embed.add_field(name="Добавил", value=f"<@{place['author_id']}>")
     if place["image_url"]:
         embed.set_image(url=place["image_url"])
-    embed.set_footer(text=f"Место #{place['id']}")
+    embed.set_footer(text=f"ID: {place['id']}")
     return embed
 
 
