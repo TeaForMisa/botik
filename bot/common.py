@@ -190,7 +190,7 @@ def place_embed(place: Any, *, hide_coordinates: bool = False) -> discord.Embed:
     }.get(place["visibility"], place["visibility"])
     embed = discord.Embed(
         title=f"📍 {place['name']}",
-        description=place["description"] or "Без описания",
+        description=place["description"] or None,
         colour=discord.Colour.blurple(),
     )
     embed.add_field(name="Измерение", value=place["dimension"])

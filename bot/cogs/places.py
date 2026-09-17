@@ -201,13 +201,15 @@ class PlaceResultsView(discord.ui.View):
         page_items = self.places[start : start + self.per_page]
         embed = discord.Embed(title="📍 Найденные места", colour=discord.Colour.blurple())
         for place in page_items:
+            details = [
+                f"**{place['dimension']}** · `{place_coordinates(place)}`",
+                f"{place['category']} · {VISIBILITY_LABELS.get(place['visibility'], place['visibility'])}",
+            ]
+            if place["description"]:
+                details.append(place["description"])
             embed.add_field(
                 name=f"#{place['id']} · {place['name']}",
-                value=(
-                    f"**{place['dimension']}** · `{place_coordinates(place)}`\n"
-                    f"{place['category']} · {VISIBILITY_LABELS.get(place['visibility'], place['visibility'])}\n"
-                    f"{place['description'] or 'Без описания'}"
-                )[:1024],
+                value="\n".join(details)[:1024],
                 inline=False,
             )
         embed.set_footer(text=f"Страница {self.page + 1} из {self.page_count}")
