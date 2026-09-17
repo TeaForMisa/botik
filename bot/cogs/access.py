@@ -94,7 +94,7 @@ class AccessCog(
         rules = await self.bot.db.get_role_access_rules(interaction.guild.id)
         if not rules:
             await interaction.response.send_message(
-                "Особых правил пока нет. Все роли могут пользоваться основными командами.",
+                "Особых правил пока нет. Ботом могут пользоваться только администраторы сервера.",
                 ephemeral=True,
             )
             return
@@ -106,7 +106,7 @@ class AccessCog(
             lines.append(f"{role_text} — **{ACCESS_LEVELS[rule['access_level']]}**")
         await interaction.response.send_message(
             "**Доступ к боту**\n" + "\n".join(lines) +
-            "\n\nЕсли у участника несколько настроенных ролей, действует самая высокая роль в списке Discord.",
+            "\n\nЕсли у участника несколько настроенных ролей, действует самая высокая роль в списке Discord. Роли без правила не дают доступа.",
             ephemeral=True,
             allowed_mentions=discord.AllowedMentions.none(),
         )

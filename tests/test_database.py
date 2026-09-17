@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from bot.common import get_member_access
+from bot.common import get_member_access, place_coordinates
 from bot.database import Database
 
 
@@ -73,9 +73,27 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         place = await self.db.get_place(place_id)
         self.assertEqual(place["image_url"], "https://cdn.example/place.png")
 
+    async def test_place_can_store_coordinates_without_height(self) -> None:
+        place_id = await self.db.create_place(
+            10,
+            "Портал",
+            "Незер",
+            120,
+            0,
+            -340,
+            "",
+            "Портал",
+            "clan",
+            42,
+            y_is_set=False,
+        )
+        place = await self.db.get_place(place_id)
+        self.assertEqual(place_coordinates(place), "120 -340")
+
     async def test_existing_database_gets_image_columns(self) -> None:
         await self.db.execute("ALTER TABLE projects DROP COLUMN image_url")
         await self.db.execute("ALTER TABLE places DROP COLUMN image_url")
+        await self.db.execute("ALTER TABLE places DROP COLUMN y_is_set")
         await self.db.close()
 
         self.db = Database(Path(self.temp_dir.name) / "test.db")
@@ -89,6 +107,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         }
         self.assertIn("image_url", project_columns)
         self.assertIn("image_url", place_columns)
+        self.assertIn("y_is_set", place_columns)
 
     async def test_role_access_rules_and_highest_role_priority(self) -> None:
         await self.db.set_role_access(10, 1, "blocked", 42)
@@ -116,7 +135,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await get_member_access(bot, member), "blocked")
 
         member.roles = [SimpleNamespace(id=99)]
-        self.assertEqual(await get_member_access(bot, member), "member")
+        self.assertEqual(await get_member_access(bot, member), "blocked")
 
         member.roles = [SimpleNamespace(id=1), SimpleNamespace(id=2)]
         member.roles.append(SimpleNamespace(id=3))

@@ -44,7 +44,7 @@ async def get_member_access(bot: Any, member: discord.Member) -> str:
     for role in reversed(member.roles):
         if role.id in levels_by_role:
             return levels_by_role[role.id]
-    return "member"
+    return "blocked"
 
 
 async def require_access(
@@ -96,6 +96,12 @@ def is_supported_image(attachment: discord.Attachment) -> bool:
 def image_filename(prefix: str, object_id: int, attachment: discord.Attachment) -> str:
     suffix = PurePath(attachment.filename).suffix.lower()
     return f"{prefix}-{object_id}{suffix}"
+
+
+def place_coordinates(place: Any) -> str:
+    if place["y_is_set"]:
+        return f"{place['x']} {place['y']} {place['z']}"
+    return f"{place['x']} {place['z']}"
 
 
 async def is_leadership(bot: Any, member: discord.Member) -> bool:
@@ -188,7 +194,7 @@ def place_embed(place: Any, *, hide_coordinates: bool = False) -> discord.Embed:
         colour=discord.Colour.blurple(),
     )
     embed.add_field(name="Измерение", value=place["dimension"])
-    coordinates = "скрыты" if hide_coordinates else f"{place['x']} {place['y']} {place['z']}"
+    coordinates = "скрыты" if hide_coordinates else place_coordinates(place)
     embed.add_field(name="Координаты", value=coordinates)
     embed.add_field(name="Категория", value=place["category"])
     embed.add_field(name="Доступ", value=visibility)

@@ -13,6 +13,7 @@ from bot.common import (
     image_filename,
     is_leadership,
     is_supported_image,
+    place_coordinates,
     place_embed,
     send_audit,
 )
@@ -23,6 +24,18 @@ VISIBILITY_LABELS = {
     "leadership": "Только руководство",
     "author": "Только автор",
 }
+
+
+def parse_coordinates(value: str) -> tuple[int, int, int, bool]:
+    parts = value.replace(",", " ").split()
+    if len(parts) not in (2, 3):
+        raise ValueError("expected X Z or X Y Z")
+    numbers = [int(part) for part in parts]
+    if len(numbers) == 2:
+        x, z = numbers
+        return x, 0, z, False
+    x, y, z = numbers
+    return x, y, z, True
 
 
 async def can_view_place(bot: Any, member: discord.Member, place: Any) -> bool:
@@ -43,8 +56,8 @@ class PlaceCreateModal(discord.ui.Modal, title="Добавить место"):
         max_length=50,
     )
     coordinates = discord.ui.TextInput(
-        label="Координаты X Y Z",
-        placeholder="320 71 -840",
+        label="Координаты X Z или X Y Z",
+        placeholder="320 -840 или 320 71 -840",
         max_length=100,
     )
     details = discord.ui.TextInput(
@@ -94,17 +107,11 @@ class PlaceCreateModal(discord.ui.Modal, title="Добавить место"):
             category = detail_lines[0].strip()
             description = "\n".join(detail_lines[1:]).strip()
 
-        normalized = str(self.coordinates).replace(",", " ").split()
-        if len(normalized) != 3:
-            await interaction.response.send_message(
-                "Введите ровно три координаты: `X Y Z`.", ephemeral=True
-            )
-            return
         try:
-            x, y, z = (int(value) for value in normalized)
+            x, y, z, y_is_set = parse_coordinates(str(self.coordinates))
         except ValueError:
             await interaction.response.send_message(
-                "Координаты должны быть целыми числами, например `320 71 -840`.",
+                "Введите две или три целые координаты: `X Z` или `X Y Z`.",
                 ephemeral=True,
             )
             return
@@ -122,6 +129,7 @@ class PlaceCreateModal(discord.ui.Modal, title="Добавить место"):
             self.visibility,
             self.author_id,
             screenshot.url if screenshot else "",
+            y_is_set,
         )
         place = await self.bot.db.get_place(place_id)
         settings = await self.bot.db.get_guild_settings(self.guild_id)
@@ -196,7 +204,7 @@ class PlaceResultsView(discord.ui.View):
             embed.add_field(
                 name=f"#{place['id']} · {place['name']}",
                 value=(
-                    f"**{place['dimension']}** · `{place['x']} {place['y']} {place['z']}`\n"
+                    f"**{place['dimension']}** · `{place_coordinates(place)}`\n"
                     f"{place['category']} · {VISIBILITY_LABELS.get(place['visibility'], place['visibility'])}\n"
                     f"{place['description'] or 'Без описания'}"
                 )[:1024],

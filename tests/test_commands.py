@@ -7,7 +7,7 @@ from pathlib import Path
 import discord
 
 from bot.cogs.access import AccessCog
-from bot.cogs.places import PlaceCreateModal, PlacesCog
+from bot.cogs.places import PlaceCreateModal, PlacesCog, parse_coordinates
 from bot.cogs.projects import ProjectCreateModal, ProjectsCog
 from bot.cogs.setup import SetupCog
 from bot.config import Settings
@@ -63,6 +63,12 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(place_modal.screenshot_field.component, discord.ui.FileUpload)
         self.assertFalse(project_modal.screenshot_field.component.required)
         self.assertFalse(place_modal.screenshot_field.component.required)
+
+    def test_place_coordinates_accept_two_or_three_numbers(self) -> None:
+        self.assertEqual(parse_coordinates("320 -840"), (320, 0, -840, False))
+        self.assertEqual(parse_coordinates("320 71 -840"), (320, 71, -840, True))
+        with self.assertRaises(ValueError):
+            parse_coordinates("320")
 
     async def test_project_view_is_persistent(self) -> None:
         view = ProjectView(self.bot, 42)

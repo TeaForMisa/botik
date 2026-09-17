@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS places (
     x INTEGER NOT NULL,
     y INTEGER NOT NULL,
     z INTEGER NOT NULL,
+    y_is_set INTEGER NOT NULL DEFAULT 1,
     description TEXT,
     category TEXT NOT NULL,
     visibility TEXT NOT NULL DEFAULT 'clan'
@@ -110,6 +111,7 @@ class Database:
         await self.connection.executescript(SCHEMA)
         await self._ensure_column("projects", "image_url", "TEXT")
         await self._ensure_column("places", "image_url", "TEXT")
+        await self._ensure_column("places", "y_is_set", "INTEGER NOT NULL DEFAULT 1")
         await self.connection.commit()
 
     async def _ensure_column(self, table: str, column: str, definition: str) -> None:
@@ -327,13 +329,14 @@ class Database:
         visibility: str,
         author_id: int,
         image_url: str = "",
+        y_is_set: bool = True,
     ) -> int:
         return await self.execute(
             """
             INSERT INTO places (
-                guild_id, name, dimension, x, y, z, description,
+                guild_id, name, dimension, x, y, z, y_is_set, description,
                 category, visibility, author_id, image_url
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 guild_id,
@@ -342,6 +345,7 @@ class Database:
                 x,
                 y,
                 z,
+                int(y_is_set),
                 description,
                 category,
                 visibility,
