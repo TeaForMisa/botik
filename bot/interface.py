@@ -50,14 +50,28 @@ def card(title, description="", footer=None):
     return result
 
 
-async def say(i, text="", *, embed=None, view=None):
+def private_component(i):
+    """Return whether an interaction belongs to our ephemeral navigation message."""
+    message = getattr(i, "message", None)
+    flags = getattr(message, "flags", None)
+    return bool(message and flags and flags.ephemeral)
+
+
+async def say(i, text="", *, embed=None, view=None, files=None):
     kwargs = dict(
         content=text or None,
         embed=embed,
         view=view,
-        ephemeral=True,
         allowed_mentions=discord.AllowedMentions.none(),
     )
+    if private_component(i):
+        kwargs["attachments"] = files or []
+        if i.response.is_done():
+            return await i.edit_original_response(**kwargs)
+        return await i.response.edit_message(**kwargs)
+    kwargs["ephemeral"] = True
+    if files:
+        kwargs["files"] = files
     if i.response.is_done():
         return await i.followup.send(**kwargs)
     return await i.response.send_message(**kwargs)
@@ -65,7 +79,10 @@ async def say(i, text="", *, embed=None, view=None):
 
 async def start(i):
     if not i.response.is_done():
-        await i.response.defer(ephemeral=True, thinking=True)
+        if private_component(i):
+            await i.response.defer()
+        else:
+            await i.response.defer(ephemeral=True, thinking=True)
 
 
 async def guard(bot, i):
@@ -176,6 +193,9 @@ class Screen(discord.ui.View):
         select.callback = selected
         self.add_item(select)
         return select
+
+    def back(self, callback):
+        return self.button("Назад", callback)
 
 
 class Form(discord.ui.Modal):
@@ -557,6 +577,11 @@ async def project_participation(bot, i, oid):
     )
     view = Screen(bot, i.user.id)
 
+    async def back(j):
+        await project_details(bot, j, oid)
+
+    view.back(back)
+
     async def choose(j, values):
         await start(j)
         async with bot.ui_lock:
@@ -607,6 +632,11 @@ async def project_details(bot, i, oid):
         embed.add_field(name="Место", value=location[:1024], inline=False)
     view = Screen(bot, i.user.id)
 
+    async def back(j):
+        await list_objects(bot, j, "project")
+
+    view.back(back)
+
     async def people(j):
         await object_for(bot, j, "project", oid)
         people_rows = await bot.db.get_project_members(oid)
@@ -616,6 +646,7 @@ async def project_details(bot, i, oid):
             "Участники",
             [f"<@{m['user_id']}> — {clean(m['role_text'])}" for m in people_rows],
             check=lambda k: object_for(bot, k, "project", oid),
+            back=lambda k: project_details(bot, k, oid),
         )
 
     view.button("Участники", people)
@@ -632,6 +663,11 @@ async def place_details(bot, i, oid):
     row = await object_for(bot, i, "place", oid)
     await start(i)
     view = Screen(bot, i.user.id)
+
+    async def back(j):
+        await list_objects(bot, j, "place")
+
+    view.back(back)
     if row["author_id"] == i.user.id or await is_leadership(bot, i.user):
 
         async def manage(j):
@@ -640,28 +676,23 @@ async def place_details(bot, i, oid):
         view.button("Управление", manage)
     embed = place_card(row)
     files = await picture(bot, row, embed)
-    sender = i.followup.send if i.response.is_done() else i.response.send_message
-    await sender(
-        embed=embed,
-        view=view,
-        files=files,
-        ephemeral=True,
-        allowed_mentions=discord.AllowedMentions.none(),
-    )
+    await say(i, embed=embed, view=view, files=files)
 
 
-async def text_pages(bot, i, title, lines, page=0, check=None):
+async def text_pages(bot, i, title, lines, page=0, check=None, back=None):
     if check:
         await check(i)
     page = max(0, min(page, max(0, (len(lines) - 1) // 10)))
     view = Screen(bot, i.user.id)
-    for label, new in [("Назад", page - 1), ("Дальше", page + 1)]:
+    for label, new in [("Пред.", page - 1), ("Дальше", page + 1)]:
         if 0 <= new * 10 < len(lines):
 
             async def go(j, n=new):
-                await text_pages(bot, j, title, lines, n, check)
+                await text_pages(bot, j, title, lines, n, check, back)
 
             view.button(label, go)
+    if back:
+        view.back(back)
     await say(
         i,
         embed=card(
@@ -676,6 +707,15 @@ async def text_pages(bot, i, title, lines, page=0, check=None):
 async def management(bot, i, kind, oid):
     row = await object_for(bot, i, kind, oid, manage=True)
     view = Screen(bot, i.user.id)
+
+    async def back(j):
+        await (
+            project_details(bot, j, oid)
+            if kind == "project"
+            else place_details(bot, j, oid)
+        )
+
+    view.back(back)
     options = [
         ("Описание", "text"),
         (
@@ -753,6 +793,11 @@ async def management(bot, i, kind, oid):
 async def status_menu(bot, i, row):
     view = Screen(bot, i.user.id)
 
+    async def back(j):
+        await management(bot, j, "project", row["id"])
+
+    view.back(back)
+
     async def selected(j, values):
         status = values[0]
 
@@ -782,6 +827,11 @@ async def status_menu(bot, i, row):
 
 async def transfer_menu(bot, i, row):
     view = Screen(bot, i.user.id)
+
+    async def back(j):
+        await management(bot, j, "project", row["id"])
+
+    view.back(back)
     select = discord.ui.UserSelect(placeholder="Новый организатор", max_values=1)
 
     async def selected(j):
@@ -808,6 +858,11 @@ async def transfer_menu(bot, i, row):
 
 async def location_menu(bot, i, kind, row):
     view = Screen(bot, i.user.id)
+
+    async def back(j):
+        await management(bot, j, kind, row["id"])
+
+    view.back(back)
 
     async def manual(j, values):
         dimension = values[0]
@@ -853,6 +908,11 @@ async def location_menu(bot, i, kind, row):
 
 async def place_option(bot, i, row, action):
     view = Screen(bot, i.user.id)
+
+    async def back(j):
+        await management(bot, j, "place", row["id"])
+
+    view.back(back)
     options = CATEGORIES if action == "category" else list(ACCESS)
 
     async def choose(j, values):
@@ -1194,7 +1254,7 @@ async def list_objects(
             ],
             selected,
         )
-    for label, new in [("Назад", page - 1), ("Дальше", page + 1)]:
+    for label, new in [("Пред.", page - 1), ("Дальше", page + 1)]:
         if 0 <= new * 5 < len(rows):
 
             async def go(j, n=new):
@@ -1258,6 +1318,17 @@ async def list_objects(
             [discord.SelectOption(label=a, value=b) for a, b in choices],
             modes,
         )
+
+    async def back(j):
+        if link_project:
+            project = await object_for(bot, j, "project", link_project, manage=True)
+            await location_menu(bot, j, "project", project)
+        elif mode == "mine":
+            await my_menu(bot, j)
+        else:
+            await panel_home(bot, j)
+
+    view.back(back)
     await say(
         i,
         embed=card(
@@ -1301,7 +1372,7 @@ async def material_list(bot, i, project_id, page=0):
             ],
             selected,
         )
-    for label, new in [("Назад", page - 1), ("Дальше", page + 1)]:
+    for label, new in [("Пред.", page - 1), ("Дальше", page + 1)]:
         if 0 <= new * 5 < len(rows):
 
             async def go(j, n=new):
@@ -1348,6 +1419,11 @@ async def material_list(bot, i, project_id, page=0):
             )
 
         view.button("Добавить материал", add)
+
+    async def back(j):
+        await project_details(bot, j, project_id)
+
+    view.back(back)
     await say(
         i,
         embed=card(
@@ -1383,6 +1459,11 @@ async def material_details(bot, i, mid):
     if own:
         desc += f"\n\nВы: доставлено {q(own['delivered'])}, ещё обещано {q(own['promised'])}"
     view = Screen(bot, i.user.id)
+
+    async def back(j):
+        await material_list(bot, j, project["id"])
+
+    view.back(back)
     if not row["closed"] and project["status"] != "completed":
         for label, action in [
             ("Принесу", "promise"),
@@ -1500,6 +1581,7 @@ async def material_details(bot, i, mid):
                 for m in members
             ],
             check=lambda k: material_for(bot, k, mid),
+            back=lambda k: material_details(bot, k, mid),
         )
 
     view.button("Кто помогает", people)
@@ -1610,6 +1692,11 @@ async def profile_screen(bot, i):
     )
     view = Screen(bot, i.user.id)
 
+    async def back(j):
+        await my_menu(bot, j)
+
+    view.back(back)
+
     async def edit(j):
         async def save(k, data):
             await bot.db.execute(
@@ -1717,6 +1804,11 @@ async def profiles_list(bot, i, skill="", page=0):
     items = visible[page * 5 : page * 5 + 5]
     view = Screen(bot, i.user.id)
 
+    async def back(j):
+        await panel_home(bot, j)
+
+    view.back(back)
+
     async def filter_skill(j, values):
         await profiles_list(bot, j, "" if values[0] == "all" else values[0])
 
@@ -1741,7 +1833,7 @@ async def profiles_list(bot, i, skill="", page=0):
             ],
             invite,
         )
-    for label, new in [("Назад", page - 1), ("Дальше", page + 1)]:
+    for label, new in [("Пред.", page - 1), ("Дальше", page + 1)]:
         if 0 <= new * 5 < len(visible):
 
             async def go(j, n=new):
@@ -1765,6 +1857,11 @@ async def invitation_menu(bot, i, target, page=0):
         r for r in rows if not r["deleted"] and await can_manage_project(bot, i.user, r)
     ]
     view = Screen(bot, i.user.id)
+
+    async def back(j):
+        await profiles_list(bot, j)
+
+    view.back(back)
     items = rows[page * 20 : page * 20 + 20]
     if not items:
         return await say(i, "Нет активных проектов, которыми вы управляете.")
@@ -1829,7 +1926,7 @@ async def invitation_menu(bot, i, target, page=0):
         ],
         selected,
     )
-    for label, new in [("Назад", page - 1), ("Дальше", page + 1)]:
+    for label, new in [("Пред.", page - 1), ("Дальше", page + 1)]:
         if 0 <= new * 20 < len(rows):
 
             async def go(j, n=new):
@@ -2095,12 +2192,23 @@ async def polls_list(bot, i, page=0, archive=False):
     rows = permitted
     page = max(0, min(page, max(0, (len(rows) - 1) // 5)))
     view = Screen(bot, i.user.id)
+
+    async def back(j):
+        await panel_home(bot, j)
+
+    view.back(back)
     items = rows[page * 5 : page * 5 + 5]
     if items:
 
         async def selected(j, values):
             row = await object_for(bot, j, "poll", int(values[0]))
-            await say(j, embed=await poll_card(bot, row), view=PollView(bot, row["id"]))
+            detail = PollView(bot, row["id"])
+
+            async def back(k):
+                await polls_list(bot, k, page, archive)
+
+            detail.back(back)
+            await say(j, embed=await poll_card(bot, row), view=detail)
 
         view.select(
             "Открыть голосование",
@@ -2110,7 +2218,7 @@ async def polls_list(bot, i, page=0, archive=False):
             ],
             selected,
         )
-    for label, new in [("Назад", page - 1), ("Дальше", page + 1)]:
+    for label, new in [("Пред.", page - 1), ("Дальше", page + 1)]:
         if 0 <= new * 5 < len(rows):
 
             async def go(j, n=new):
@@ -2181,8 +2289,21 @@ class PanelView(Screen):
         select.custom_id = "panel:more"
 
 
+async def panel_home(bot, i):
+    await say(
+        i,
+        embed=card("Клан", "Проекты, места и ваши дела — в одном меню."),
+        view=PanelView(bot),
+    )
+
+
 async def my_menu(bot, i):
     view = Screen(bot, i.user.id)
+
+    async def back(j):
+        await panel_home(bot, j)
+
+    view.back(back)
 
     async def projects(j):
         await list_objects(bot, j, "project", mode="mine")
@@ -2209,6 +2330,7 @@ async def my_menu(bot, i):
                 f"Открыть: /material id:{r['id']}"
                 for r in rows
             ],
+            back=lambda k: my_menu(bot, k),
         )
 
     view.button("Проекты", projects)

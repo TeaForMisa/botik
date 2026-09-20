@@ -28,6 +28,7 @@ from bot.interface import (
     create_poll,
     confirm,
     profiles_list,
+    say,
 )
 from bot.cogs.hub import HubCog
 from main import ClanBot
@@ -88,6 +89,38 @@ class InterfaceTests(unittest.IsolatedAsyncioTestCase):
             self.assertLessEqual(len(embed), 6000)
             self.assertLessEqual(len(embed.description or ""), 4096)
         return args
+
+    async def test_private_navigation_edits_one_ephemeral_message(self):
+        interaction = SimpleNamespace(
+            message=SimpleNamespace(flags=SimpleNamespace(ephemeral=True)),
+            response=SimpleNamespace(
+                is_done=lambda: False,
+                edit_message=AsyncMock(),
+                send_message=AsyncMock(),
+            ),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+        await say(interaction, "Следующий экран")
+        interaction.response.edit_message.assert_awaited_once()
+        interaction.response.send_message.assert_not_awaited()
+        self.assertEqual(
+            interaction.response.edit_message.call_args.kwargs["attachments"], []
+        )
+
+    async def test_public_panel_opens_a_new_private_message(self):
+        interaction = SimpleNamespace(
+            message=SimpleNamespace(flags=SimpleNamespace(ephemeral=False)),
+            response=SimpleNamespace(
+                is_done=lambda: False,
+                edit_message=AsyncMock(),
+                send_message=AsyncMock(),
+            ),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+        await say(interaction, "Личное меню")
+        interaction.response.send_message.assert_awaited_once()
+        interaction.response.edit_message.assert_not_awaited()
+        self.assertTrue(interaction.response.send_message.call_args.kwargs["ephemeral"])
 
     async def test_project_card_is_compact_with_30_members(self):
         for uid in range(30):

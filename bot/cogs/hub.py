@@ -21,6 +21,7 @@ from bot.interface import (
     material_details,
     sync_poll,
     object_for,
+    panel_home,
 )
 
 
@@ -65,11 +66,7 @@ class HubCog(commands.Cog):
     @app_commands.guild_only()
     @bot_access_check()
     async def menu(self, i: discord.Interaction):
-        await say(
-            i,
-            embed=card("Клан", "Проекты, места и ваши дела — в одном меню."),
-            view=PanelView(self.bot),
-        )
+        await panel_home(self.bot, i)
 
     @app_commands.command(
         name="panel", description="Опубликовать постоянную панель в канале"
