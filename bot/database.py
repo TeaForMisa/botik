@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+import asyncio
+from contextlib import asynccontextmanager
 from typing import Any, Iterable
 
 import aiosqlite
-
 
 SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -100,11 +101,17 @@ class Database:
     def __init__(self, path: Path) -> None:
         self.path = path
         self.connection: aiosqlite.Connection | None = None
+        self.lock = asyncio.Lock()
 
     async def initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        existing = self.path.is_file() and self.path.stat().st_size > 0
         self.connection = await aiosqlite.connect(self.path)
         self.connection.row_factory = aiosqlite.Row
+        if existing:
+            from bot.storage import backup
+
+            await backup(self)
         await self.connection.execute("PRAGMA journal_mode = WAL")
         await self.connection.execute("PRAGMA foreign_keys = ON")
         await self.connection.execute("PRAGMA busy_timeout = 5000")
@@ -113,11 +120,16 @@ class Database:
         await self._ensure_column("places", "image_url", "TEXT")
         await self._ensure_column("places", "y_is_set", "INTEGER NOT NULL DEFAULT 1")
         await self.connection.commit()
+        from bot.storage import migrate
+
+        await migrate(self)
 
     async def _ensure_column(self, table: str, column: str, definition: str) -> None:
         rows = await self.fetchall(f"PRAGMA table_info({table})")
         if not any(row["name"] == column for row in rows):
-            await self.db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            await self.db.execute(
+                f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
+            )
 
     async def close(self) -> None:
         if self.connection is not None:
@@ -131,15 +143,30 @@ class Database:
         return self.connection
 
     async def execute(self, sql: str, params: Iterable[Any] = ()) -> int:
-        cursor = await self.db.execute(sql, tuple(params))
-        await self.db.commit()
-        return cursor.lastrowid or 0
+        async with self.transaction() as connection:
+            cursor = await connection.execute(sql, tuple(params))
+            return cursor.lastrowid or 0
 
-    async def fetchone(self, sql: str, params: Iterable[Any] = ()) -> aiosqlite.Row | None:
+    @asynccontextmanager
+    async def transaction(self):
+        async with self.lock:
+            await self.db.execute("BEGIN IMMEDIATE")
+            try:
+                yield self.db
+                await self.db.commit()
+            except BaseException:
+                await self.db.rollback()
+                raise
+
+    async def fetchone(
+        self, sql: str, params: Iterable[Any] = ()
+    ) -> aiosqlite.Row | None:
         async with self.db.execute(sql, tuple(params)) as cursor:
             return await cursor.fetchone()
 
-    async def fetchall(self, sql: str, params: Iterable[Any] = ()) -> list[aiosqlite.Row]:
+    async def fetchall(
+        self, sql: str, params: Iterable[Any] = ()
+    ) -> list[aiosqlite.Row]:
         async with self.db.execute(sql, tuple(params)) as cursor:
             return await cursor.fetchall()
 
@@ -263,10 +290,13 @@ class Database:
     async def get_project(self, project_id: int) -> aiosqlite.Row | None:
         return await self.fetchone("SELECT * FROM projects WHERE id = ?", (project_id,))
 
-    async def get_projects(self, guild_id: int, include_completed: bool = False) -> list[aiosqlite.Row]:
+    async def get_projects(
+        self, guild_id: int, include_completed: bool = False
+    ) -> list[aiosqlite.Row]:
         if include_completed:
             return await self.fetchall(
-                "SELECT * FROM projects WHERE guild_id = ? ORDER BY id DESC", (guild_id,)
+                "SELECT * FROM projects WHERE guild_id = ? ORDER BY id DESC",
+                (guild_id,),
             )
         return await self.fetchall(
             """
@@ -375,16 +405,17 @@ class Database:
         if not include_deleted:
             conditions.append("is_deleted = 0")
         if query:
-            conditions.append("LOWER(name) LIKE ?")
-            params.append(f"%{query.lower()}%")
+            conditions.append("CASEFOLD(name) LIKE ?")
+            params.append(f"%{query.casefold()}%")
         if category:
-            conditions.append("LOWER(category) = ?")
-            params.append(category.lower())
+            conditions.append("CASEFOLD(category) = ?")
+            params.append(category.casefold())
         if dimension:
-            conditions.append("LOWER(dimension) = ?")
-            params.append(dimension.lower())
+            conditions.append("CASEFOLD(dimension) = ?")
+            params.append(dimension.casefold())
         return await self.fetchall(
-            f"SELECT * FROM places WHERE {' AND '.join(conditions)} ORDER BY name", params
+            f"SELECT * FROM places WHERE {' AND '.join(conditions)} ORDER BY name",
+            params,
         )
 
     async def soft_delete_place(self, place_id: int) -> None:

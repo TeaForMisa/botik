@@ -7,8 +7,9 @@ from pathlib import Path
 import discord
 
 from bot.cogs.access import AccessCog
-from bot.cogs.places import PlaceCreateModal, PlacesCog, parse_coordinates
-from bot.cogs.projects import ProjectCreateModal, ProjectsCog
+from bot.cogs.places import PlacesCog, parse_coordinates
+from bot.cogs.projects import ProjectsCog
+from bot.interface import Form, ImageForm, PanelView, PlaceView, PollView
 from bot.cogs.setup import SetupCog
 from bot.config import Settings
 from bot.views import ProjectView
@@ -39,30 +40,38 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
 
         project_commands = {command.name for command in commands["project"].commands}
         place_commands = {command.name for command in commands["place"].commands}
-        self.assertEqual(project_commands, {"create", "list"})
-        self.assertEqual(place_commands, {"add", "find", "list", "delete", "restore"})
+        self.assertEqual(project_commands, {"create", "list", "open"})
+        self.assertEqual(
+            place_commands, {"add", "find", "list", "delete", "restore", "open"}
+        )
         access_commands = {command.name for command in commands["access"].commands}
         self.assertEqual(access_commands, {"set", "remove", "list"})
 
         project_create = next(
-            command for command in commands["project"].commands if command.name == "create"
+            command
+            for command in commands["project"].commands
+            if command.name == "create"
         )
         place_add = next(
             command for command in commands["place"].commands if command.name == "add"
         )
         self.assertEqual(project_create.parameters, [])
-        self.assertEqual([parameter.name for parameter in place_add.parameters], ["visibility"])
+        self.assertEqual(
+            [parameter.name for parameter in place_add.parameters], ["visibility"]
+        )
 
-    async def test_create_forms_contain_optional_file_upload(self) -> None:
-        project_modal = ProjectCreateModal(self.bot, 10, 20)
-        place_modal = PlaceCreateModal(self.bot, 10, 20, "clan")
+    async def test_small_forms_and_separate_image_upload(self) -> None:
+        async def save(i, data):
+            pass
 
-        self.assertEqual(len(project_modal.children), 5)
-        self.assertEqual(len(place_modal.children), 5)
-        self.assertIsInstance(project_modal.screenshot_field.component, discord.ui.FileUpload)
-        self.assertIsInstance(place_modal.screenshot_field.component, discord.ui.FileUpload)
-        self.assertFalse(project_modal.screenshot_field.component.required)
-        self.assertFalse(place_modal.screenshot_field.component.required)
+        form = Form(
+            self.bot, 20, "Описание", [("name", "Название", "Дом", True, 100)], save
+        )
+        self.assertEqual(len(form.children), 1)
+        self.assertEqual(form.inputs["name"].default, "Дом")
+        image = ImageForm(self.bot, 20, "project", {"id": 1})
+        self.assertEqual(len(image.children), 1)
+        self.assertIsInstance(image.upload, discord.ui.FileUpload)
 
     def test_place_coordinates_accept_two_or_three_numbers(self) -> None:
         self.assertEqual(parse_coordinates("320 -840"), (320, 0, -840, False))
@@ -78,11 +87,19 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
             custom_ids,
             {
                 "project:42:join",
-                "project:42:leave",
-                "project:42:coordinates",
-                "project:42:status",
+                "project:42:materials",
+                "project:42:details",
             },
         )
+
+    async def test_all_public_views_are_persistent(self):
+        for view in [
+            PanelView(self.bot),
+            PlaceView(self.bot, 7),
+            PollView(self.bot, 8),
+        ]:
+            self.assertTrue(view.is_persistent())
+            self.assertLessEqual(len(view.to_components()), 5)
 
 
 if __name__ == "__main__":
