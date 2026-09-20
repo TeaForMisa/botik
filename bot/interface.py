@@ -50,6 +50,11 @@ def card(title, description="", footer=None):
     return result
 
 
+def page_footer(page, total, size):
+    pages = max(1, (total + size - 1) // size)
+    return f"Страница {page + 1}/{pages} · Всего: {total}"
+
+
 def private_component(i):
     """Return whether an interaction belongs to our ephemeral navigation message."""
     message = getattr(i, "message", None)
@@ -263,7 +268,7 @@ async def confirm(bot, i, text, callback, *, danger=False):
     async def no(j):
         nonlocal used
         used = True
-        await j.response.edit_message(content="Отменено.", embed=None, view=None)
+        await panel_home(bot, j)
         view.stop()
 
     view.button("Подтвердить", yes, danger=danger, primary=not danger)
@@ -472,13 +477,15 @@ async def changed(bot, i, kind, row, fields):
         row["id"],
         "Изменены поля: " + ", ".join(fields),
     )
-    await say(
-        i,
-        (
-            "Сохранено."
-            if ok
-            else "Данные сохранены, но карточка не обновлена. Проверьте права бота и нажмите «Восстановить карточку»."
-        ),
+    if fields.get("deleted") or fields.get("is_deleted"):
+        return await list_objects(bot, i, kind)
+    notice = ""
+    if not ok:
+        notice = "Сохранено, но общая карточка не обновилась. Проверьте права бота или восстановите карточку через управление."
+    await (
+        project_details(bot, i, row["id"], notice=notice)
+        if kind == "project"
+        else place_details(bot, i, row["id"], notice=notice)
     )
 
 
@@ -570,7 +577,17 @@ class PlaceView(Screen):
 async def project_participation(bot, i, oid):
     row = await object_for(bot, i, "project", oid)
     if row["status"] == "completed":
-        return await say(i, "Проект завершён. Набор закрыт.")
+        view = Screen(bot, i.user.id)
+
+        async def back(j):
+            await project_details(bot, j, oid)
+
+        view.back(back)
+        return await say(
+            i,
+            embed=card("Участие · " + row["name"], "Проект завершён, набор закрыт."),
+            view=view,
+        )
     member = await bot.db.fetchone(
         "SELECT * FROM project_members WHERE project_id=? AND user_id=?",
         (oid, i.user.id),
@@ -589,12 +606,8 @@ async def project_participation(bot, i, oid):
             if current["status"] == "completed":
                 raise ValueError("Проект уже завершён.")
             await bot.db.join_project(oid, j.user.id, values[0])
-            ok = await sync_project(bot, oid)
-        await say(
-            j,
-            "Участие сохранено."
-            + (" Карточка временно не обновлена." if not ok else ""),
-        )
+            await sync_project(bot, oid)
+        await project_participation(bot, j, oid)
 
     view.select(
         "Чем хотите помочь?", [discord.SelectOption(label=s) for s in SKILLS], choose
@@ -607,23 +620,18 @@ async def project_participation(bot, i, oid):
             async with bot.ui_lock:
                 await bot.db.leave_project(oid, j.user.id)
                 await sync_project(bot, oid)
-            await say(
-                j, "Вы вышли из проекта. Обещания материалов отменяются отдельно."
-            )
+            await project_participation(bot, j, oid)
 
         view.button("Выйти из проекта", leave)
-    await say(
-        i,
-        (
-            ("Вы участвуете: " + member["role_text"])
-            if member
-            else "Выберите, чем хотите помочь."
-        ),
-        view=view,
+    description = (
+        "Сейчас вы участвуете как: **" + clean(member["role_text"]) + "**."
+        if member
+        else "Выберите, чем хотите помочь проекту."
     )
+    await say(i, embed=card("Участие · " + row["name"], description), view=view)
 
 
-async def project_details(bot, i, oid):
+async def project_details(bot, i, oid, *, notice="", back_to=None):
     row = await object_for(bot, i, "project", oid)
     await start(i)
     embed = await project_card(bot, row)
@@ -632,10 +640,10 @@ async def project_details(bot, i, oid):
         embed.add_field(name="Место", value=location[:1024], inline=False)
     view = Screen(bot, i.user.id)
 
-    async def back(j):
+    async def default_back(j):
         await list_objects(bot, j, "project")
 
-    view.back(back)
+    view.back(back_to or default_back)
 
     async def people(j):
         await object_for(bot, j, "project", oid)
@@ -656,18 +664,18 @@ async def project_details(bot, i, oid):
             await management(bot, j, "project", oid)
 
         view.button("Управление", manage)
-    await say(i, embed=embed, view=view)
+    await say(i, notice, embed=embed, view=view)
 
 
-async def place_details(bot, i, oid):
+async def place_details(bot, i, oid, *, notice="", back_to=None):
     row = await object_for(bot, i, "place", oid)
     await start(i)
     view = Screen(bot, i.user.id)
 
-    async def back(j):
+    async def default_back(j):
         await list_objects(bot, j, "place")
 
-    view.back(back)
+    view.back(back_to or default_back)
     if row["author_id"] == i.user.id or await is_leadership(bot, i.user):
 
         async def manage(j):
@@ -676,7 +684,7 @@ async def place_details(bot, i, oid):
         view.button("Управление", manage)
     embed = place_card(row)
     files = await picture(bot, row, embed)
-    await say(i, embed=embed, view=view, files=files)
+    await say(i, notice, embed=embed, view=view, files=files)
 
 
 async def text_pages(bot, i, title, lines, page=0, check=None, back=None):
@@ -697,8 +705,8 @@ async def text_pages(bot, i, title, lines, page=0, check=None, back=None):
         i,
         embed=card(
             title,
-            "\n".join(lines[page * 10 : page * 10 + 10]) or "Пока пусто.",
-            f"Страница {page+1}",
+            "\n".join(lines[page * 10 : page * 10 + 10]) or "Здесь пока пусто.",
+            page_footer(page, len(lines), 10),
         ),
         view=view,
     )
@@ -725,7 +733,7 @@ async def management(bot, i, kind, oid):
         ),
         ("Заменить изображение", "image"),
         ("Убрать изображение", "noimage"),
-        ("Восстановить карточку", "publish"),
+        ("Опубликовать / обновить карточку", "publish"),
     ]
     if kind == "project":
         options += [
@@ -787,7 +795,14 @@ async def management(bot, i, kind, oid):
         [discord.SelectOption(label=a, value=b) for a, b in options],
         choose,
     )
-    await say(i, embed=card("Управление", clean(row["name"])), view=view)
+    await say(
+        i,
+        embed=card(
+            "Управление · " + clean(row["name"]),
+            "Выберите, что хотите изменить.",
+        ),
+        view=view,
+    )
 
 
 async def status_menu(bot, i, row):
@@ -821,7 +836,12 @@ async def status_menu(bot, i, row):
         selected,
     )
     await say(
-        i, "При возобновлении запросы материалов открываются отдельно.", view=view
+        i,
+        embed=card(
+            "Статус проекта",
+            "Выберите новый статус. После возобновления запросы материалов открываются отдельно.",
+        ),
+        view=view,
     )
 
 
@@ -851,7 +871,10 @@ async def transfer_menu(bot, i, row):
     view.add_item(select)
     await say(
         i,
-        "После передачи прежний организатор теряет специальные права на проект.",
+        embed=card(
+            "Передача проекта",
+            "Выберите нового организатора. После передачи управлять проектом сможет он и руководство.",
+        ),
         view=view,
     )
 
@@ -903,7 +926,18 @@ async def location_menu(bot, i, kind, row):
             await list_objects(bot, j, "place", link_project=row["id"])
 
         view.button("Выбрать общее место", link)
-    await say(i, "Место проекта не должно содержать секретные координаты.", view=view)
+    await say(
+        i,
+        embed=card(
+            "Место проекта" if kind == "project" else "Координаты места",
+            (
+                "Введите координаты вручную или выберите общее место из справочника."
+                if kind == "project"
+                else "Выберите измерение, затем введите координаты."
+            ),
+        ),
+        view=view,
+    )
 
 
 async def place_option(bot, i, row, action):
@@ -934,7 +968,7 @@ async def place_option(bot, i, row, action):
             await confirm(
                 bot,
                 j,
-                "Изменить доступ? Уже увиденное отозвать нельзя. Старые карточки, созданные первой версией бота, могли не сохраниться в базе: проверьте канал и уберите их вручную.",
+                "Изменить доступ? Уже увиденные координаты скрыть обратно нельзя. Если в канале осталась старая карточка этого места, удалите её вручную.",
                 save,
             )
         else:
@@ -963,7 +997,18 @@ async def place_option(bot, i, row, action):
             )
 
         view.button("Своя категория", custom)
-    await say(i, view=view)
+    await say(
+        i,
+        embed=card(
+            "Категория места" if action == "category" else "Доступ к месту",
+            (
+                "Выберите подходящую категорию или добавьте свою."
+                if action == "category"
+                else "Выберите, кто сможет найти это место и увидеть его координаты."
+            ),
+        ),
+        view=view,
+    )
 
 
 async def publish(bot, i, kind, oid):
@@ -980,13 +1025,15 @@ async def publish(bot, i, kind, oid):
                     if kind == "project"
                     else sync_place(bot, oid)
                 )
-                return await say(
-                    i,
-                    (
-                        "Карточка обновлена."
-                        if ok
-                        else "Карточка не обновлена: проверьте права бота."
-                    ),
+                notice = (
+                    "Карточка обновлена."
+                    if ok
+                    else "Карточка не обновилась. Проверьте права бота."
+                )
+                return await (
+                    project_details(bot, i, oid, notice=notice)
+                    if kind == "project"
+                    else place_details(bot, i, oid, notice=notice)
                 )
         settings = await bot.db.get_guild_settings(i.guild_id)
         if not settings:
@@ -1038,7 +1085,12 @@ async def publish(bot, i, kind, oid):
                 "UPDATE places SET channel_id=?,message_id=? WHERE id=?",
                 (channel.id, message.id, oid),
             )
-    await say(i, "Карточка: " + message.jump_url)
+    notice = "Карточка опубликована: " + message.jump_url
+    await (
+        project_details(bot, i, oid, notice=notice)
+        if kind == "project"
+        else place_details(bot, i, oid, notice=notice)
+    )
 
 
 async def create_project(bot, i):
@@ -1056,7 +1108,7 @@ async def create_project(bot, i):
         except discord.HTTPException:
             await say(
                 j,
-                "Проект сохранён, но публикация не удалась. Он доступен в «Моё» → «Управление» → «Восстановить карточку».",
+                "Проект сохранён, но карточка не опубликовалась. Откройте проект через «Моё» и выберите «Управление» → «Опубликовать / обновить карточку».",
             )
 
     await i.response.send_modal(
@@ -1128,9 +1180,13 @@ async def create_place(bot, i, visibility="clan"):
     )
     await say(
         i,
-        "Доступ: **"
-        + ACCESS[visibility]
-        + "**. Место сохранится в справочник без публикации в канал.",
+        embed=card(
+            "Новое место",
+            "Сначала выберите измерение. Затем укажите название и координаты.\n\n"
+            "Доступ: **"
+            + ACCESS[visibility]
+            + "** · публикация в канал выполняется отдельно.",
+        ),
         view=view,
     )
 
@@ -1146,6 +1202,7 @@ async def list_objects(
     link_project=None,
     category="",
     dimension="",
+    origin="panel",
 ):
     await start(i)
     if kind == "project":
@@ -1221,9 +1278,10 @@ async def list_objects(
                         row["revision"],
                         {"deleted": 0} if kind == "project" else {"is_deleted": 0},
                     )
-                    await say(
-                        k,
-                        "Восстановлено. При необходимости восстановите карточку через управление.",
+                    await (
+                        project_details(bot, k, oid)
+                        if kind == "project"
+                        else place_details(bot, k, oid)
                     )
 
                 return await confirm(bot, j, "Восстановить запись?", restore)
@@ -1240,10 +1298,24 @@ async def list_objects(
                     project,
                     {"place_id": oid, "coordinates": "", "dimension": ""},
                 )
+
+            async def return_to_list(k):
+                await list_objects(
+                    bot,
+                    k,
+                    kind,
+                    page=page,
+                    query=query,
+                    mode=mode,
+                    category=category,
+                    dimension=dimension,
+                    origin=origin,
+                )
+
             await (
-                project_details(bot, j, oid)
+                project_details(bot, j, oid, back_to=return_to_list)
                 if kind == "project"
-                else place_details(bot, j, oid)
+                else place_details(bot, j, oid, back_to=return_to_list)
             )
 
         view.select(
@@ -1268,6 +1340,7 @@ async def list_objects(
                     link_project=link_project,
                     category=category,
                     dimension=dimension,
+                    origin=origin,
                 )
 
             view.button(label, go)
@@ -1283,6 +1356,7 @@ async def list_objects(
                 link_project=link_project,
                 category=values.get("category", ""),
                 dimension=values.get("dimension", ""),
+                origin=origin,
             )
 
         fields = [("query", "Часть названия", query, False, 100)]
@@ -1301,10 +1375,10 @@ async def list_objects(
                 create_project(bot, j) if kind == "project" else create_place(bot, j)
             )
 
-        view.button("Добавить", add)
+        view.button("Новый проект" if kind == "project" else "Новое место", add)
 
         async def modes(j, values):
-            await list_objects(bot, j, kind, mode=values[0])
+            await list_objects(bot, j, kind, mode=values[0], origin=origin)
 
         choices = [
             ("Активные" if kind == "project" else "Все доступные", "active"),
@@ -1323,18 +1397,49 @@ async def list_objects(
         if link_project:
             project = await object_for(bot, j, "project", link_project, manage=True)
             await location_menu(bot, j, "project", project)
-        elif mode == "mine":
+        elif origin == "mine":
             await my_menu(bot, j)
         else:
             await panel_home(bot, j)
 
     view.back(back)
+    if kind == "project":
+        titles = {
+            "active": "🏗️ Проекты",
+            "archive": "🏗️ Завершённые проекты",
+            "mine": "🏗️ Мои проекты",
+            "deleted": "🏗️ Удалённые проекты",
+        }
+        empty = {
+            "active": "Активных проектов пока нет. Можно создать первый.",
+            "archive": "Завершённых проектов пока нет.",
+            "mine": "У вас пока нет своих проектов или участия в чужих.",
+            "deleted": "Удалённых проектов нет.",
+        }
+    else:
+        titles = {
+            "active": "📍 Места",
+            "mine": "📍 Мои места",
+            "deleted": "📍 Удалённые места",
+        }
+        empty = {
+            "active": "Мест пока нет. Сохраните базу, ферму, склад или другую точку.",
+            "mine": "Вы пока не добавили ни одного места.",
+            "deleted": "Удалённых мест нет.",
+        }
+    if query and not rows:
+        empty_text = "По вашему запросу ничего не найдено."
+    else:
+        empty_text = empty.get(mode, "Здесь пока пусто.")
+    if link_project:
+        titles[mode] = "📍 Место проекта"
+        empty_text = "Подходящих общих мест пока нет."
     await say(
         i,
         embed=card(
-            "Проекты" if kind == "project" else "Места",
-            desc or "Ничего не найдено.",
-            f"Страница {page+1} · Записей: {len(rows)}",
+            titles.get(mode, "🏗️ Проекты" if kind == "project" else "📍 Места"),
+            desc or empty_text,
+            page_footer(page, len(rows), 5),
         ),
         view=view,
     )
@@ -1427,9 +1532,10 @@ async def material_list(bot, i, project_id, page=0):
     await say(
         i,
         embed=card(
-            "Материалы · " + project["name"],
-            "\n\n".join(lines) or "Запросов пока нет.",
-            f"Страница {page+1} · Количества отмечают участники",
+            "📦 Материалы · " + project["name"],
+            "\n\n".join(lines)
+            or "Для этого проекта пока не запрашивали материалы.",
+            page_footer(page, len(rows), 5),
         ),
         view=view,
     )
@@ -1710,13 +1816,13 @@ async def profile_screen(bot, i):
             Form(
                 bot,
                 j.user.id,
-                "Игровой профиль",
+                "Моя анкета",
                 [("nick", "Minecraft-ник", row["nick"] if row else "", True, 32)],
                 save,
             )
         )
 
-    view.button("Изменить ник" if row else "Создать профиль", edit, primary=True)
+    view.button("Изменить ник" if row else "Заполнить анкету", edit, primary=True)
     if row:
 
         async def skills(j, values):
@@ -1728,7 +1834,7 @@ async def profile_screen(bot, i):
             await profile_screen(bot, j)
 
         view.select(
-            "Интересы (можно несколько)",
+            "Чем хотите заниматься?",
             [
                 discord.SelectOption(label=s, default=s in row["skills"].split(", "))
                 for s in SKILLS
@@ -1757,12 +1863,12 @@ async def profile_screen(bot, i):
                     "DELETE FROM profiles WHERE guild_id=? AND user_id=?",
                     (k.guild_id, k.user.id),
                 )
-                await say(k, "Анкета удалена. Участие в проектах и доставки сохранены.")
+                await profile_screen(bot, k)
 
             await confirm(bot, j, "Удалить анкету?", save)
 
         view.button(
-            "Скрыть профиль" if row["visible"] else "Показать профиль", visibility
+            "Скрыть анкету" if row["visible"] else "Показать анкету", visibility
         )
         view.button(
             "Выключить приглашения" if row["invites"] else "Разрешить приглашения",
@@ -1772,12 +1878,12 @@ async def profile_screen(bot, i):
     desc = (
         (
             f"Minecraft: **{clean(row['nick'])}**\n{clean(row['skills'])}\n\n"
-            f"В поиске: {'да' if row['visible'] else 'нет'} · Приглашения: {'да' if row['invites'] else 'нет'}"
+            f"В списке участников: {'да' if row['visible'] else 'нет'} · Приглашения: {'включены' if row['invites'] else 'выключены'}"
         )
         if row
-        else "Только игровой ник и интересы. Никакой статистики активности."
+        else "Укажите Minecraft-ник и интересы. Так другим будет проще позвать вас в подходящий проект."
     )
-    await say(i, embed=card("Моя анкета", desc), view=view)
+    await say(i, embed=card("👤 Моя анкета", desc), view=view)
 
 
 async def profiles_list(bot, i, skill="", page=0):
@@ -1813,7 +1919,7 @@ async def profiles_list(bot, i, skill="", page=0):
         await profiles_list(bot, j, "" if values[0] == "all" else values[0])
 
     view.select(
-        "Направление",
+        "Фильтр по интересам",
         [discord.SelectOption(label="Все", value="all")]
         + [discord.SelectOption(label=s, value=s) for s in SKILLS],
         filter_skill,
@@ -1844,9 +1950,18 @@ async def profiles_list(bot, i, skill="", page=0):
         f"**{clean(r['nick'])}** · <@{r['user_id']}>\n{clean(r['skills'])}"
         for r in items
     )
+    empty = (
+        "По этому направлению никого не найдено."
+        if skill
+        else "Открытых анкет пока нет."
+    )
     await say(
         i,
-        embed=card("Участники клана", desc or "Анкет пока нет.", f"Страница {page+1}"),
+        embed=card(
+            "👥 Участники",
+            desc or empty,
+            page_footer(page, len(visible), 5),
+        ),
         view=view,
     )
 
@@ -1864,7 +1979,14 @@ async def invitation_menu(bot, i, target, page=0):
     view.back(back)
     items = rows[page * 20 : page * 20 + 20]
     if not items:
-        return await say(i, "Нет активных проектов, которыми вы управляете.")
+        return await say(
+            i,
+            embed=card(
+                "Приглашение в проект",
+                "У вас нет активных проектов, в которые можно пригласить участника.",
+            ),
+            view=view,
+        )
 
     async def selected(j, values):
         oid = int(values[0])
@@ -1902,7 +2024,7 @@ async def invitation_menu(bot, i, target, page=0):
                 try:
                     await member.send(
                         f"Вас приглашают в проект **{clean(project['name'])}** на сервере **{clean(k.guild.name)}**.\n{link}\n"
-                        "Участие добровольное. Приглашения отключаются в /menu → Моё → Анкета.",
+                        "Участие добровольное. Приглашения отключаются в /menu → Моё → Моя анкета.",
                         allowed_mentions=discord.AllowedMentions.none(),
                     )
                 except discord.Forbidden:
@@ -1914,7 +2036,7 @@ async def invitation_menu(bot, i, target, page=0):
                     "DO UPDATE SET sent_at=excluded.sent_at",
                     (oid, target, int(time.time())),
                 )
-            await say(k, "Приглашение отправлено.")
+            await invitation_menu(bot, k, target)
 
         await confirm(bot, j, f"Отправить одно личное приглашение <@{target}>?", send)
 
@@ -1933,7 +2055,14 @@ async def invitation_menu(bot, i, target, page=0):
                 await invitation_menu(bot, j, target, n)
 
             view.button(label, go)
-    await say(i, view=view)
+    await say(
+        i,
+        embed=card(
+            "Приглашение в проект",
+            f"Выберите проект, в который хотите пригласить <@{target}>.",
+        ),
+        view=view,
+    )
 
 
 async def poll_card(bot, row):
@@ -1970,21 +2099,35 @@ async def poll_card(bot, row):
 
 
 class PollView(Screen):
-    def __init__(self, bot, oid):
+    def __init__(self, bot, oid, back=None):
         super().__init__(bot, timeout=None)
+
+        async def show_poll(i, notice=""):
+            row = await object_for(bot, i, "poll", oid)
+            await say(
+                i,
+                notice,
+                embed=await poll_card(bot, row),
+                view=PollView(bot, oid, back=back),
+            )
 
         async def vote_menu(i):
             row = await object_for(bot, i, "poll", oid)
             if row["status"] != "open" or time.time() >= row["deadline"]:
-                return await say(i, "Голосование завершено.")
+                return await show_poll(i, "Голосование уже завершено.")
             view = Screen(bot, i.user.id)
+
+            async def return_to_poll(j):
+                await show_poll(j)
+
+            view.back(return_to_poll)
 
             async def choose(j, values):
                 await start(j)
                 await object_for(bot, j, "poll", oid)
                 await storage.vote(bot.db, oid, j.user.id, int(values[0]))
                 await sync_poll(bot, oid)
-                await say(j, "Голос сохранён. До окончания его можно изменить.")
+                await show_poll(j, "Голос сохранён. До окончания его можно изменить.")
 
             options = json.loads(row["options"])
             view.select(
@@ -1997,7 +2140,11 @@ class PollView(Screen):
             )
             await say(
                 i,
-                "Один человек — один голос. Повторный выбор заменяет предыдущий.",
+                embed=card(
+                    "Ваш голос",
+                    clean(row["question"])
+                    + "\n\nВыберите один вариант. Новый выбор заменит предыдущий.",
+                ),
                 view=view,
             )
 
@@ -2008,6 +2155,11 @@ class PollView(Screen):
                 (oid, i.user.id),
             )
             view = Screen(bot, i.user.id)
+
+            async def return_to_poll(j):
+                await show_poll(j)
+
+            view.back(return_to_poll)
             if not row["hidden"]:
 
                 async def people(j):
@@ -2027,6 +2179,7 @@ class PollView(Screen):
                             for r in rows
                         ],
                         check=lambda k: object_for(bot, k, "poll", oid),
+                        back=lambda k: details(k),
                     )
 
                 view.button("Кто как голосовал", people)
@@ -2045,7 +2198,7 @@ class PollView(Screen):
                             if cursor.rowcount != 1:
                                 raise ValueError("Голосование уже завершено.")
                         await sync_poll(bot, oid)
-                        await say(k, "Голосование отменено.")
+                        await show_poll(k, "Голосование отменено.")
 
                     await j.response.send_modal(
                         Form(
@@ -2067,6 +2220,8 @@ class PollView(Screen):
 
         self.button("Голосовать", vote_menu, key=f"poll:{oid}:vote", primary=True)
         self.button("Подробнее", details, key=f"poll:{oid}:details")
+        if back:
+            self.back(back)
 
 
 async def sync_poll(bot, oid):
@@ -2165,7 +2320,12 @@ async def create_poll(bot, i, official=False, hidden=False):
         await bot.db.execute(
             "UPDATE polls SET message_id=? WHERE id=?", (message.id, oid)
         )
-        await say(j, "Голосование опубликовано: " + message.jump_url)
+        await say(
+            j,
+            "Голосование опубликовано: " + message.jump_url,
+            embed=await poll_card(bot, row),
+            view=PollView(bot, oid),
+        )
 
     await i.response.send_modal(
         Form(
@@ -2202,12 +2362,10 @@ async def polls_list(bot, i, page=0, archive=False):
 
         async def selected(j, values):
             row = await object_for(bot, j, "poll", int(values[0]))
-            detail = PollView(bot, row["id"])
-
             async def back(k):
                 await polls_list(bot, k, page, archive)
 
-            detail.back(back)
+            detail = PollView(bot, row["id"], back=back)
             await say(j, embed=await poll_card(bot, row), view=detail)
 
         view.select(
@@ -2244,13 +2402,14 @@ async def polls_list(bot, i, page=0, archive=False):
             discord.SelectOption(label="Официальное решение", value="1:0"),
             discord.SelectOption(label="Решение со скрытым выбором", value="1:1"),
         ]
-    view.select("Создать", options, create)
+    view.select("Создать голосование", options, create)
+    empty = "В архиве пока пусто." if archive else "Активных голосований пока нет."
     await say(
         i,
         embed=card(
-            "Архив голосований" if archive else "Голосования",
-            "\n".join(clean(r["question"]) for r in items) or "Пока пусто.",
-            f"Страница {page+1}",
+            "🗳️ Архив голосований" if archive else "🗳️ Голосования",
+            "\n".join(clean(r["question"]) for r in items) or empty,
+            page_footer(page, len(rows), 5),
         ),
         view=view,
     )
@@ -2269,30 +2428,26 @@ class PanelView(Screen):
         async def mine(i):
             await my_menu(bot, i)
 
-        self.button("Проекты", projects, key="panel:projects", primary=True)
-        self.button("Места", places, key="panel:places")
-        self.button("Моё", mine, key="panel:mine")
+        async def people(i):
+            await profiles_list(bot, i)
 
-        async def more(i, values):
-            await (
-                profiles_list(bot, i) if values[0] == "profiles" else polls_list(bot, i)
-            )
+        async def votes(i):
+            await polls_list(bot, i)
 
-        select = self.select(
-            "Участники и решения",
-            [
-                discord.SelectOption(label="Анкеты участников", value="profiles"),
-                discord.SelectOption(label="Голосования", value="polls"),
-            ],
-            more,
-        )
-        select.custom_id = "panel:more"
+        self.button("🏗️ Проекты", projects, key="panel:projects", primary=True)
+        self.button("📍 Места", places, key="panel:places")
+        self.button("👥 Участники", people, key="panel:people")
+        self.button("🗳️ Голосования", votes, key="panel:votes")
+        self.button("👤 Моё", mine, key="panel:mine")
 
 
 async def panel_home(bot, i):
     await say(
         i,
-        embed=card("Клан", "Проекты, места и ваши дела — в одном меню."),
+        embed=card(
+            "Меню клана",
+            "Проекты и материалы, места и координаты, участники, голосования и ваши записи.",
+        ),
         view=PanelView(bot),
     )
 
@@ -2306,10 +2461,10 @@ async def my_menu(bot, i):
     view.back(back)
 
     async def projects(j):
-        await list_objects(bot, j, "project", mode="mine")
+        await list_objects(bot, j, "project", mode="mine", origin="mine")
 
     async def places(j):
-        await list_objects(bot, j, "place", mode="mine")
+        await list_objects(bot, j, "place", mode="mine", origin="mine")
 
     async def profile(j):
         await profile_screen(bot, j)
@@ -2333,8 +2488,15 @@ async def my_menu(bot, i):
             back=lambda k: my_menu(bot, k),
         )
 
-    view.button("Проекты", projects)
-    view.button("Места", places)
-    view.button("Анкета", profile)
-    view.button("Обещания", promises)
-    await say(i, embed=card("Моё", "Ваши проекты, места и настройки."), view=view)
+    view.button("Мои проекты", projects)
+    view.button("Мои места", places)
+    view.button("Моя анкета", profile)
+    view.button("Обещанные ресурсы", promises)
+    await say(
+        i,
+        embed=card(
+            "👤 Моё",
+            "Ваши проекты, сохранённые места, анкета и обещанные ресурсы.",
+        ),
+        view=view,
+    )

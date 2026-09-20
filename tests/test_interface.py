@@ -237,7 +237,7 @@ class InterfaceTests(unittest.IsolatedAsyncioTestCase):
     async def test_create_place_menu_has_disclosure(self):
         await create_place(self.bot, self.i, "author")
         args = self.check_screen()
-        self.assertIn("Только я", args["content"])
+        self.assertIn("Только я", args["embed"].description)
 
     async def test_confirmation_does_not_execute_twice(self):
         callback = AsyncMock()

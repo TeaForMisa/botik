@@ -101,6 +101,21 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(view.is_persistent())
             self.assertLessEqual(len(view.to_components()), 5)
 
+    async def test_panel_has_five_equal_sections(self):
+        view = PanelView(self.bot)
+        self.assertTrue(all(isinstance(item, discord.ui.Button) for item in view.children))
+        self.assertEqual(len(view.to_components()), 1)
+        self.assertEqual(
+            {item.custom_id for item in view.children},
+            {
+                "panel:projects",
+                "panel:places",
+                "panel:people",
+                "panel:votes",
+                "panel:mine",
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
