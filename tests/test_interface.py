@@ -21,6 +21,7 @@ from bot.interface import (
     management,
     PanelView,
     Form,
+    ImageForm,
     place_details,
     changed,
     create_project,
@@ -301,6 +302,34 @@ class InterfaceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(
             any(getattr(item, "label", None) == "Назад" for item in args["view"].children)
         )
+
+    async def test_image_can_be_added_when_place_did_not_have_one(self):
+        row = await self.bot.db.get_place(self.place)
+        self.assertIsNone(row["image_url"])
+        form = ImageForm(self.bot, 42, "place", row)
+        attachment = SimpleNamespace(
+            filename="place.png",
+            content_type="image/png",
+            size=7,
+            read=AsyncMock(return_value=b"picture"),
+        )
+        form.upload._values = [attachment]
+
+        with patch("bot.interface.guard", new=AsyncMock(return_value=True)):
+            await form.on_submit(self.i)
+
+        saved = await self.bot.db.get_place(self.place)
+        self.assertTrue(saved["image_url"].startswith("local:"))
+        image_path = (
+            self.bot.db.path.parent / "media" / saved["image_url"].removeprefix("local:")
+        )
+        self.assertEqual(image_path.read_bytes(), b"picture")
+        sent = self.i.response.send_message.call_args.kwargs
+        self.assertEqual(len(sent["files"]), 1)
+        self.assertEqual(
+            sent["embed"].image.url, "attachment://" + image_path.name
+        )
+        sent["files"][0].close()
 
     async def test_confirmation_does_not_execute_twice(self):
         callback = AsyncMock()

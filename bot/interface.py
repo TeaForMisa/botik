@@ -529,21 +529,52 @@ class ImageForm(discord.ui.Modal):
         if not await guard(self.bot, i) or i.user.id != self.owner:
             return
         await start(i)
+        saved_path = None
         try:
-            await object_for(self.bot, i, self.kind, self.row["id"], manage=True)
+            current = await object_for(
+                self.bot, i, self.kind, self.row["id"], manage=True
+            )
             attachment = self.upload.values[0]
             if not is_supported_image(attachment) or attachment.size > 8 * 1024 * 1024:
                 raise ValueError(
                     "Нужна картинка PNG, JPG, WEBP или GIF размером до 8 МБ."
                 )
+            if current["message_id"]:
+                channel = self.bot.get_channel(
+                    current["channel_id"]
+                ) or await self.bot.fetch_channel(current["channel_id"])
+                bot_member = i.guild.me
+                if bot_member is None or not channel.permissions_for(
+                    bot_member
+                ).attach_files:
+                    raise ValueError(
+                        "Бот не может прикреплять файлы в канал этой карточки. "
+                        "Выдайте ему право «Прикреплять файлы» и попробуйте ещё раз."
+                    )
+            try:
+                data = await attachment.read()
+            except discord.NotFound:
+                data = await attachment.read(use_cached=True)
+            if not data or len(data) > 8 * 1024 * 1024:
+                raise ValueError(
+                    "Картинка не загрузилась или превышает 8 МБ. Попробуйте другой файл."
+                )
             folder = self.bot.db.path.parent / "media"
             folder.mkdir(parents=True, exist_ok=True)
             name = uuid.uuid4().hex + Path(attachment.filename).suffix.lower()
-            await attachment.save(folder / name)
+            saved_path = folder / name
+            await asyncio.to_thread(saved_path.write_bytes, data)
             await changed(
                 self.bot, i, self.kind, self.row, {"image_url": "local:" + name}
             )
         except Exception as exc:
+            if saved_path is not None and saved_path.is_file():
+                table = "projects" if self.kind == "project" else "places"
+                saved = await self.bot.db.fetchone(
+                    f"SELECT image_url FROM {table} WHERE id=?", (self.row["id"],)
+                )
+                if not saved or saved["image_url"] != "local:" + saved_path.name:
+                    saved_path.unlink()
             await error(i, exc)
 
 

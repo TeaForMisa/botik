@@ -47,9 +47,13 @@ class SetupCog(commands.Cog):
                 permissions.view_channel
                 and permissions.send_messages
                 and permissions.embed_links
+                and permissions.attach_files
+                and permissions.read_message_history
             ):
                 await interaction.followup.send(
-                    f"Бот не может читать и отправлять карточки в {channel.mention}. Исправьте права.",
+                    f"Боту не хватает прав в {channel.mention}. Нужны: просмотр "
+                    "канала, отправка сообщений, встраивание ссылок, прикрепление "
+                    "файлов и чтение истории.",
                     ephemeral=True,
                 )
                 return

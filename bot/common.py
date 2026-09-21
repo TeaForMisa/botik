@@ -89,8 +89,11 @@ def is_supported_image(attachment: discord.Attachment) -> bool:
     suffix = PurePath(attachment.filename).suffix.lower()
     if suffix not in SUPPORTED_IMAGE_EXTENSIONS:
         return False
-    return attachment.content_type is None or attachment.content_type.startswith(
-        "image/"
+    content_type = attachment.content_type
+    return (
+        content_type is None
+        or content_type.startswith("image/")
+        or content_type == "application/octet-stream"
     )
 
 
