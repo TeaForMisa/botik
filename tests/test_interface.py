@@ -223,6 +223,38 @@ class InterfaceTests(unittest.IsolatedAsyncioTestCase):
             payload = command.to_dict(self.bot.tree)
             self.assertLessEqual(len(payload.get("options", [])), 25)
 
+    async def test_diagnose_reports_one_broken_channel_without_crashing(self):
+        await self.bot.db.save_guild_settings(10, 101, 102, 103, None, 42)
+        await self.bot.db.execute(
+            "UPDATE guild_settings SET votes_channel_id=? WHERE guild_id=?", (104, 10)
+        )
+        bot_member = object()
+        default_role = object()
+
+        def permissions_for(member):
+            if member is bot_member:
+                raise AttributeError("unexpected channel implementation")
+            return SimpleNamespace(view_channel=False)
+
+        channel = SimpleNamespace(permissions_for=permissions_for)
+        interaction = SimpleNamespace(
+            guild_id=10,
+            user=SimpleNamespace(id=42),
+            guild=SimpleNamespace(me=bot_member, default_role=default_role),
+            response=SimpleNamespace(
+                is_done=lambda: False,
+                defer=AsyncMock(),
+                send_message=AsyncMock(),
+            ),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+        with self.assertLogs(level="ERROR"):
+            with patch.object(self.bot, "get_channel", return_value=channel):
+                await HubCog.diagnose.callback(HubCog(self.bot), interaction)
+        embed = interaction.response.send_message.call_args.kwargs["embed"]
+        self.assertIn("не удалось проверить права", embed.description)
+        self.assertIn("База данных: доступна", embed.description)
+
     async def test_forms_can_open_without_prior_defer(self):
         await create_project(self.bot, self.i)
         self.i.response.send_modal.assert_awaited_once()

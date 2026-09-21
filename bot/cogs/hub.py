@@ -24,6 +24,17 @@ from bot.interface import (
     panel_home,
 )
 
+PERMISSION_LABELS = {
+    "view_channel": "просматривать канал",
+    "send_messages": "отправлять сообщения",
+    "embed_links": "встраивать ссылки",
+    "attach_files": "прикреплять файлы",
+    "read_message_history": "читать историю",
+    "send_messages_in_threads": "писать в ветках",
+    "manage_threads": "управлять ветками",
+    "create_public_threads": "создавать публичные ветки",
+}
+
 
 class HubCog(commands.Cog):
     def __init__(self, bot):
@@ -177,6 +188,14 @@ class HubCog(commands.Cog):
         settings = await self.bot.db.get_guild_settings(i.guild_id)
         if not settings:
             return await say(i, "Сервер не настроен: /setup.")
+        bot_member = i.guild.me
+        if bot_member is None and self.bot.user is not None:
+            bot_member = i.guild.get_member(self.bot.user.id)
+            if bot_member is None:
+                try:
+                    bot_member = await i.guild.fetch_member(self.bot.user.id)
+                except discord.HTTPException:
+                    logging.exception("Не удалось получить участника бота для диагностики")
         lines = []
         for key, label in [
             ("projects_channel_id", "Проекты"),
@@ -184,13 +203,16 @@ class HubCog(commands.Cog):
             ("log_channel_id", "Журнал"),
             ("votes_channel_id", "Голосования"),
         ]:
-            cid = settings[key]
+            cid = settings[key] if key in settings.keys() else None
             if not cid:
                 lines.append(label + ": не настроен")
                 continue
             try:
                 channel = self.bot.get_channel(cid) or await self.bot.fetch_channel(cid)
-                perms = channel.permissions_for(i.guild.me)
+                if bot_member is None:
+                    lines.append("❌ " + label + ": не удалось определить права бота")
+                    continue
+                perms = channel.permissions_for(bot_member)
                 needed = [
                     "view_channel",
                     "send_messages",
@@ -202,26 +224,46 @@ class HubCog(commands.Cog):
                     needed += ["send_messages_in_threads", "manage_threads"]
                     if isinstance(channel, discord.TextChannel):
                         needed.append("create_public_threads")
-                missing = [name for name in needed if not getattr(perms, name)]
+                missing = [
+                    PERMISSION_LABELS[name]
+                    for name in needed
+                    if not getattr(perms, name, False)
+                ]
                 lines.append(
-                    label
+                    ("⚠️ " if missing else "✅ ")
+                    + label
                     + ": "
                     + (
-                        "не хватает " + ", ".join(missing)
+                        "не хватает — " + ", ".join(missing)
                         if missing
                         else "права в порядке"
                     )
                 )
                 if channel.permissions_for(i.guild.default_role).view_channel:
                     lines.append(
-                        "⚠ " + label + ": канал виден @everyone; проверьте доступ."
+                        "⚠️ " + label + ": канал виден @everyone; проверьте доступ"
                     )
             except discord.HTTPException:
-                lines.append(label + ": канал недоступен")
+                lines.append("❌ " + label + ": канал недоступен")
+            except Exception:
+                logging.exception("Не удалось проверить канал %s (%s)", label, cid)
+                lines.append("❌ " + label + ": не удалось проверить права")
+        try:
+            database_ok = bool(await self.bot.db.fetchone("SELECT 1"))
+        except Exception:
+            logging.exception("Не удалось проверить базу данных")
+            database_ok = False
         lines.append(
-            "База: " + ("OK" if await self.bot.db.fetchone("SELECT 1") else "ошибка")
+            ("✅ База данных: доступна" if database_ok else "❌ База данных: ошибка")
         )
-        await say(i, embed=card("Проверка настроек", "\n".join(lines)))
+        await say(
+            i,
+            embed=card(
+                "🔧 Проверка настроек",
+                "\n".join(lines),
+                "Исправьте предупреждения и запустите /diagnose ещё раз.",
+            ),
+        )
 
     @app_commands.command(
         name="poll-repair", description="Восстановить удалённую карточку голосования"
