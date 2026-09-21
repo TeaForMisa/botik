@@ -35,6 +35,7 @@ SKILLS = [
 ]
 ACCESS = {"clan": "Весь клан", "leadership": "Руководство", "author": "Только я"}
 COLOUR = 0x7986CB
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
 
 def clean(value):
@@ -521,7 +522,7 @@ class ImageForm(discord.ui.Modal):
         self.upload = discord.ui.FileUpload(required=True, max_values=1)
         self.add_item(
             discord.ui.Label(
-                text="PNG, JPG, WEBP или GIF, до 8 МБ", component=self.upload
+                text="PNG, JPG, WEBP или GIF, до 10 МБ", component=self.upload
             )
         )
 
@@ -535,9 +536,9 @@ class ImageForm(discord.ui.Modal):
                 self.bot, i, self.kind, self.row["id"], manage=True
             )
             attachment = self.upload.values[0]
-            if attachment.size and attachment.size > 8 * 1024 * 1024:
+            if attachment.size and attachment.size > MAX_IMAGE_BYTES:
                 raise ValueError(
-                    "Нужна картинка PNG, JPG, WEBP или GIF размером до 8 МБ."
+                    "Нужна картинка PNG, JPG, WEBP или GIF размером до 10 МБ."
                 )
             if current["message_id"]:
                 channel = self.bot.get_channel(
@@ -555,9 +556,9 @@ class ImageForm(discord.ui.Modal):
                 data = await attachment.read()
             except discord.NotFound:
                 data = await attachment.read(use_cached=True)
-            if not data or len(data) > 8 * 1024 * 1024:
+            if not data or len(data) > MAX_IMAGE_BYTES:
                 raise ValueError(
-                    "Картинка не загрузилась или превышает 8 МБ. Попробуйте другой файл."
+                    "Картинка не загрузилась или превышает 10 МБ. Попробуйте другой файл."
                 )
             extension = image_extension(data)
             if extension is None:
