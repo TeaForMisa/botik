@@ -25,6 +25,7 @@ from bot.interface import (
     changed,
     create_project,
     create_place,
+    create_place_category,
     create_poll,
     confirm,
     profiles_list,
@@ -285,6 +286,21 @@ class InterfaceTests(unittest.IsolatedAsyncioTestCase):
         await create_place(self.bot, self.i, "author")
         args = self.check_screen()
         self.assertIn("Только я", args["embed"].description)
+
+    async def test_create_place_asks_for_category(self):
+        await create_place_category(self.bot, self.i, "clan", "Незер")
+        args = self.check_screen()
+        self.assertIn("Незер", args["embed"].description)
+        select = next(
+            item for item in args["view"].children if isinstance(item, discord.ui.Select)
+        )
+        self.assertEqual(
+            [option.label for option in select.options],
+            ["База", "Город", "Ферма", "Склад", "Портал", "Деревня", "Другое"],
+        )
+        self.assertTrue(
+            any(getattr(item, "label", None) == "Назад" for item in args["view"].children)
+        )
 
     async def test_confirmation_does_not_execute_twice(self):
         callback = AsyncMock()

@@ -1135,7 +1135,29 @@ async def create_place(bot, i, visibility="clan"):
     view = Screen(bot, i.user.id)
 
     async def choose(j, values):
-        dimension = values[0]
+        await create_place_category(bot, j, visibility, values[0])
+
+    view.select(
+        "Измерение", [discord.SelectOption(label=x) for x in DIMENSIONS], choose
+    )
+    await say(
+        i,
+        embed=card(
+            "Новое место",
+            "Сначала выберите измерение.\n\n"
+            "Доступ: **"
+            + ACCESS[visibility]
+            + "** · публикация в канал выполняется отдельно.",
+        ),
+        view=view,
+    )
+
+
+async def create_place_category(bot, i, visibility, dimension):
+    view = Screen(bot, i.user.id)
+
+    async def choose(j, values):
+        category = values[0]
 
         async def save(k, data):
             if visibility == "leadership" and not await is_leadership(bot, k.user):
@@ -1149,7 +1171,7 @@ async def create_place(bot, i, visibility="clan"):
                 y,
                 z,
                 data["description"],
-                "Другое",
+                category,
                 visibility,
                 k.user.id,
                 y_is_set=has_y,
@@ -1179,17 +1201,18 @@ async def create_place(bot, i, visibility="clan"):
             )
         )
 
+    async def back(j):
+        await create_place(bot, j, visibility)
+
     view.select(
-        "Измерение", [discord.SelectOption(label=x) for x in DIMENSIONS], choose
+        "Категория", [discord.SelectOption(label=x) for x in CATEGORIES], choose
     )
+    view.back(back)
     await say(
         i,
         embed=card(
             "Новое место",
-            "Сначала выберите измерение. Затем укажите название и координаты.\n\n"
-            "Доступ: **"
-            + ACCESS[visibility]
-            + "** · публикация в канал выполняется отдельно.",
+            "Измерение: **" + clean(dimension) + "**\nТеперь выберите категорию.",
         ),
         view=view,
     )
