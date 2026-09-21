@@ -325,7 +325,8 @@ class InterfaceTests(unittest.IsolatedAsyncioTestCase):
         )
         embed = place_card(await self.bot.db.get_place(two_coordinates))
         self.assertIn(
-            "🧭 **X** `7351` · **Z** `4734`", embed.description
+            "🔥 Незер · Портал\n\n🧭 **X** `7351` · **Z** `4734`",
+            embed.description,
         )
         self.assertTrue(embed.title.startswith("🌀 "))
         self.assertEqual(embed.colour.value, 0xB64242)

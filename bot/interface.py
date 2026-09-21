@@ -455,7 +455,7 @@ def place_card(row):
     )
     category_icon = CATEGORY_ICONS.get(row["category"], "📍")
     desc = f"{dimension_icon} {clean(row['dimension'])} · {clean(row['category'])}"
-    desc += "\n🧭 " + " · ".join(coordinates)
+    desc += "\n\n🧭 " + " · ".join(coordinates)
     if row["description"]:
         desc += "\n\n" + clean(row["description"])
     if row["visibility"] != "clan":
