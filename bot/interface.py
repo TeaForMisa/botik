@@ -18,7 +18,7 @@ from bot.common import (
     is_leadership,
     place_coordinates,
     send_audit,
-    is_supported_image,
+    image_extension,
 )
 from bot import storage
 
@@ -535,7 +535,7 @@ class ImageForm(discord.ui.Modal):
                 self.bot, i, self.kind, self.row["id"], manage=True
             )
             attachment = self.upload.values[0]
-            if not is_supported_image(attachment) or attachment.size > 8 * 1024 * 1024:
+            if attachment.size and attachment.size > 8 * 1024 * 1024:
                 raise ValueError(
                     "Нужна картинка PNG, JPG, WEBP или GIF размером до 8 МБ."
                 )
@@ -559,9 +559,15 @@ class ImageForm(discord.ui.Modal):
                 raise ValueError(
                     "Картинка не загрузилась или превышает 8 МБ. Попробуйте другой файл."
                 )
+            extension = image_extension(data)
+            if extension is None:
+                raise ValueError(
+                    "Discord передал файл, который не удалось распознать как PNG, "
+                    "JPG, WEBP или GIF."
+                )
             folder = self.bot.db.path.parent / "media"
             folder.mkdir(parents=True, exist_ok=True)
-            name = uuid.uuid4().hex + Path(attachment.filename).suffix.lower()
+            name = uuid.uuid4().hex + extension
             saved_path = folder / name
             await asyncio.to_thread(saved_path.write_bytes, data)
             await changed(

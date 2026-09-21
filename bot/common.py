@@ -97,6 +97,19 @@ def is_supported_image(attachment: discord.Attachment) -> bool:
     )
 
 
+def image_extension(data: bytes) -> str | None:
+    """Return a safe extension from the image bytes, ignoring Discord metadata."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return ".gif"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp"
+    return None
+
+
 def image_filename(prefix: str, object_id: int, attachment: discord.Attachment) -> str:
     suffix = PurePath(attachment.filename).suffix.lower()
     return f"{prefix}-{object_id}{suffix}"

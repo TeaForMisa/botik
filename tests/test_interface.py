@@ -307,11 +307,12 @@ class InterfaceTests(unittest.IsolatedAsyncioTestCase):
         row = await self.bot.db.get_place(self.place)
         self.assertIsNone(row["image_url"])
         form = ImageForm(self.bot, 42, "place", row)
+        image_data = b"\x89PNG\r\n\x1a\nimage-data"
         attachment = SimpleNamespace(
-            filename="place.png",
-            content_type="image/png",
-            size=7,
-            read=AsyncMock(return_value=b"picture"),
+            filename="discord-upload",
+            content_type="application/octet-stream",
+            size=len(image_data),
+            read=AsyncMock(return_value=image_data),
         )
         form.upload._values = [attachment]
 
@@ -323,7 +324,8 @@ class InterfaceTests(unittest.IsolatedAsyncioTestCase):
         image_path = (
             self.bot.db.path.parent / "media" / saved["image_url"].removeprefix("local:")
         )
-        self.assertEqual(image_path.read_bytes(), b"picture")
+        self.assertEqual(image_path.suffix, ".png")
+        self.assertEqual(image_path.read_bytes(), image_data)
         sent = self.i.response.send_message.call_args.kwargs
         self.assertEqual(len(sent["files"]), 1)
         self.assertEqual(
