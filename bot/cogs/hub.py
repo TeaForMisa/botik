@@ -19,6 +19,7 @@ from bot.interface import (
     profiles_list,
     polls_list,
     material_details,
+    sync_place,
     sync_poll,
     object_for,
     panel_home,
@@ -179,6 +180,45 @@ class HubCog(commands.Cog):
             i,
             "Копия создана в backups рядом с базой. Заберите её через хостинг; изображения находятся в media. Копия не отправляется в Discord, поскольку содержит приватные данные.",
         )
+
+    @app_commands.command(
+        name="places-refresh",
+        description="Обновить все опубликованные карточки мест",
+    )
+    @app_commands.guild_only()
+    @bot_access_check(admin=True)
+    async def places_refresh(self, i: discord.Interaction):
+        await start(i)
+        rows = await self.bot.db.fetchall(
+            "SELECT id FROM places WHERE guild_id=? AND visibility='clan' "
+            "AND is_deleted=0 AND message_id IS NOT NULL ORDER BY id",
+            (i.guild_id,),
+        )
+        if not rows:
+            return await say(i, "Опубликованных карточек мест пока нет.")
+        updated = 0
+        failed = 0
+        async with self.bot.ui_lock:
+            for row in rows:
+                try:
+                    ok = await sync_place(self.bot, row["id"])
+                except Exception:
+                    logging.exception(
+                        "Не обновлена карточка места %s при массовом обновлении",
+                        row["id"],
+                    )
+                    ok = False
+                if ok:
+                    updated += 1
+                else:
+                    failed += 1
+        result = f"Обновлено карточек мест: **{updated}**."
+        if failed:
+            result += (
+                f"\nНе удалось обновить: **{failed}**. Проверьте права бота. "
+                "Если сообщение удалено, опубликуйте место заново через управление."
+            )
+        await say(i, result)
 
     @app_commands.command(name="diagnose", description="Проверить каналы и права")
     @app_commands.guild_only()

@@ -23,7 +23,22 @@ from bot.common import (
 from bot import storage
 
 DIMENSIONS = ["Обычный мир", "Незер", "Энд"]
-CATEGORIES = ["База", "Город", "Ферма", "Склад", "Портал", "Деревня", "Другое"]
+CATEGORIES = ["База", "Ферма", "Склад", "Трейдхолл", "Другое"]
+CATEGORY_ICONS = {
+    "База": "🏠",
+    "Город": "🏙️",
+    "Ферма": "🌾",
+    "Склад": "📦",
+    "Портал": "🌀",
+    "Деревня": "🏘️",
+    "Трейдхолл": "🤝",
+    "Другое": "📍",
+}
+DIMENSION_STYLE = {
+    "Обычный мир": ("🌍", 0x5B8C51),
+    "Незер": ("🔥", 0xB64242),
+    "Энд": ("🌌", 0x8B6FB3),
+}
 SKILLS = [
     "Строительство",
     "Декор",
@@ -42,9 +57,9 @@ def clean(value):
     return discord.utils.escape_markdown(str(value)).replace("@", "@\u200b")
 
 
-def card(title, description="", footer=None):
+def card(title, description="", footer=None, colour=COLOUR):
     result = discord.Embed(
-        title=str(title)[:256], description=description or None, colour=COLOUR
+        title=str(title)[:256], description=description or None, colour=colour
     )
     if footer:
         result.set_footer(text=footer)
@@ -423,6 +438,7 @@ async def sync_place(bot, oid):
         await bot.db.execute(
             "UPDATE places SET channel_id=NULL,message_id=NULL WHERE id=?", (oid,)
         )
+        return False
     except discord.HTTPException:
         logging.exception("Не обновлена карточка места %s", oid)
         return False
@@ -434,15 +450,22 @@ def place_card(row):
     if row["y_is_set"]:
         coordinates.append(f"**Y** `{row['y']}`")
     coordinates.append(f"**Z** `{row['z']}`")
-    desc = (
-        f"{clean(row['dimension'])} · {clean(row['category'])}"
-        "\nКоординаты: " + " · ".join(coordinates)
+    dimension_icon, colour = DIMENSION_STYLE.get(
+        row["dimension"], ("🌍", COLOUR)
     )
+    category_icon = CATEGORY_ICONS.get(row["category"], "📍")
+    desc = f"{dimension_icon} {clean(row['dimension'])} · {clean(row['category'])}"
+    desc += "\n🧭 " + " · ".join(coordinates)
     if row["description"]:
         desc += "\n\n" + clean(row["description"])
     if row["visibility"] != "clan":
         desc += "\n\nДоступ: " + ACCESS[row["visibility"]]
-    return card("📍 " + row["name"], desc, f"Место #{row['id']}")
+    return card(
+        category_icon + " " + clean(row["name"]),
+        desc,
+        f"Место #{row['id']}",
+        colour=colour,
+    )
 
 
 async def changed(bot, i, kind, row, fields):
@@ -627,7 +650,7 @@ class PlaceView(Screen):
         async def open_place(i):
             await place_details(bot, i, oid)
 
-        self.button("Открыть", open_place, key=f"place:{oid}:open")
+        self.button("Подробнее", open_place, key=f"place:{oid}:open")
 
 
 async def project_participation(bot, i, oid):

@@ -90,6 +90,23 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         place = await self.db.get_place(place_id)
         self.assertEqual(place_coordinates(place), "120 -340")
 
+    async def test_old_village_category_is_migrated_to_trading_hall(self) -> None:
+        place_id = await self.db.create_place(
+            10, "Жители", "Обычный мир", 1, 64, 2, "", "Деревня", "clan", 42
+        )
+        await self.db.close()
+        self.db = Database(Path(self.temp_dir.name) / "test.db")
+        await self.db.initialize()
+
+        place = await self.db.get_place(place_id)
+        self.assertEqual(place["category"], "Трейдхолл")
+        self.assertEqual(place["revision"], 1)
+
+        await self.db.close()
+        self.db = Database(Path(self.temp_dir.name) / "test.db")
+        await self.db.initialize()
+        self.assertEqual((await self.db.get_place(place_id))["revision"], 1)
+
     async def test_existing_database_gets_image_columns(self) -> None:
         await self.db.execute("ALTER TABLE projects DROP COLUMN image_url")
         await self.db.execute("ALTER TABLE places DROP COLUMN image_url")

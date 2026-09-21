@@ -67,6 +67,10 @@ async def migrate(db):
     }.items():
         for column, definition in fields.items():
             await db._ensure_column(table, column, definition)
+    await db.db.execute(
+        "UPDATE places SET category='Трейдхолл',revision=revision+1 "
+        "WHERE category='Деревня'"
+    )
     await db.db.commit()
 
 

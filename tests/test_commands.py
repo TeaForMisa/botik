@@ -100,6 +100,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         ]:
             self.assertTrue(view.is_persistent())
             self.assertLessEqual(len(view.to_components()), 5)
+        self.assertEqual(PlaceView(self.bot, 7).children[0].label, "Подробнее")
 
     async def test_panel_has_five_equal_sections(self):
         view = PanelView(self.bot)

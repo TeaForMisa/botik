@@ -234,6 +234,7 @@ class InterfaceTests(unittest.IsolatedAsyncioTestCase):
                 "material",
                 "diagnose",
                 "backup",
+                "places-refresh",
             }
             <= names
         )
@@ -273,6 +274,25 @@ class InterfaceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("не удалось проверить права", embed.description)
         self.assertIn("База данных: доступна", embed.description)
 
+    async def test_places_refresh_updates_each_published_place(self):
+        await self.bot.db.execute(
+            "UPDATE places SET visibility='clan',channel_id=100,message_id=200 "
+            "WHERE id=?",
+            (self.place,),
+        )
+        unpublished = await self.bot.db.create_place(
+            10, "Склад", "Обычный мир", 3, 0, 4, "", "Склад", "clan", 42
+        )
+        refresh = AsyncMock(return_value=True)
+
+        with patch("bot.cogs.hub.sync_place", new=refresh):
+            await HubCog.places_refresh.callback(HubCog(self.bot), self.i)
+
+        refresh.assert_awaited_once_with(self.bot, self.place)
+        self.assertNotEqual(self.place, unpublished)
+        message = self.i.response.send_message.call_args.kwargs["content"]
+        self.assertIn("Обновлено карточек мест: **1**", message)
+
     async def test_forms_can_open_without_prior_defer(self):
         await create_project(self.bot, self.i)
         self.i.response.send_modal.assert_awaited_once()
@@ -289,20 +309,31 @@ class InterfaceTests(unittest.IsolatedAsyncioTestCase):
         args = self.check_screen()
         self.assertIn("Только я", args["embed"].description)
 
-    async def test_place_card_splits_coordinates_into_columns(self):
+    async def test_place_card_has_clear_coordinates_and_visual_style(self):
         two_coordinates = await self.bot.db.create_place(
-            10, "Портал", "Незер", 7351, 0, 4734, "", "Портал", "clan", 42,
+            10,
+            "Портал",
+            "Незер",
+            7351,
+            0,
+            4734,
+            "",
+            "Портал",
+            "clan",
+            42,
             y_is_set=False,
         )
         embed = place_card(await self.bot.db.get_place(two_coordinates))
         self.assertIn(
-            "Координаты: **X** `7351` · **Z** `4734`", embed.description
+            "🧭 **X** `7351` · **Z** `4734`", embed.description
         )
+        self.assertTrue(embed.title.startswith("🌀 "))
+        self.assertEqual(embed.colour.value, 0xB64242)
         self.assertEqual(embed.fields, [])
 
         embed = place_card(await self.bot.db.get_place(self.place))
         self.assertIn(
-            "Координаты: **X** `1` · **Y** `0` · **Z** `2`", embed.description
+            "🧭 **X** `1` · **Y** `0` · **Z** `2`", embed.description
         )
 
     async def test_create_place_asks_for_category(self):
@@ -314,7 +345,7 @@ class InterfaceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             [option.label for option in select.options],
-            ["База", "Город", "Ферма", "Склад", "Портал", "Деревня", "Другое"],
+            ["База", "Ферма", "Склад", "Трейдхолл", "Другое"],
         )
         self.assertTrue(
             any(getattr(item, "label", None) == "Назад" for item in args["view"].children)
