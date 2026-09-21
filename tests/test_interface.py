@@ -295,15 +295,11 @@ class InterfaceTests(unittest.IsolatedAsyncioTestCase):
             y_is_set=False,
         )
         embed = place_card(await self.bot.db.get_place(two_coordinates))
-        self.assertEqual(
-            [(field.name, field.value) for field in embed.fields],
-            [("X", "`7351`"), ("Z", "`4734`")],
-        )
+        self.assertIn("```\nX      Z\n7351   4734\n```", embed.description)
+        self.assertEqual(embed.fields, [])
 
         embed = place_card(await self.bot.db.get_place(self.place))
-        self.assertEqual(
-            [field.name for field in embed.fields], ["X", "Y", "Z"]
-        )
+        self.assertIn("```\nX   Y   Z\n1   0   2\n```", embed.description)
 
     async def test_create_place_asks_for_category(self):
         await create_place_category(self.bot, self.i, "clan", "Незер")

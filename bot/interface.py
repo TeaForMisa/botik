@@ -430,17 +430,26 @@ async def sync_place(bot, oid):
 
 
 def place_card(row):
-    desc = f"{clean(row['dimension'])} · {clean(row['category'])}"
+    coordinates = [("X", str(row["x"]))]
+    if row["y_is_set"]:
+        coordinates.append(("Y", str(row["y"])))
+    coordinates.append(("Z", str(row["z"])))
+    widths = [max(len(label), len(value)) for label, value in coordinates]
+    labels = "   ".join(
+        label.ljust(width) for (label, _), width in zip(coordinates, widths)
+    ).rstrip()
+    values = "   ".join(
+        value.ljust(width) for (_, value), width in zip(coordinates, widths)
+    ).rstrip()
+    desc = (
+        f"{clean(row['dimension'])} · {clean(row['category'])}"
+        f"\n```\n{labels}\n{values}\n```"
+    )
     if row["description"]:
         desc += "\n\n" + clean(row["description"])
     if row["visibility"] != "clan":
         desc += "\n\nДоступ: " + ACCESS[row["visibility"]]
-    embed = card("📍 " + row["name"], desc, f"Место #{row['id']}")
-    embed.add_field(name="X", value=f"`{row['x']}`", inline=True)
-    if row["y_is_set"]:
-        embed.add_field(name="Y", value=f"`{row['y']}`", inline=True)
-    embed.add_field(name="Z", value=f"`{row['z']}`", inline=True)
-    return embed
+    return card("📍 " + row["name"], desc, f"Место #{row['id']}")
 
 
 async def changed(bot, i, kind, row, fields):
