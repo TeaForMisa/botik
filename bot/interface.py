@@ -430,20 +430,13 @@ async def sync_place(bot, oid):
 
 
 def place_card(row):
-    coordinates = [("X", str(row["x"]))]
+    coordinates = [f"**X** `{row['x']}`"]
     if row["y_is_set"]:
-        coordinates.append(("Y", str(row["y"])))
-    coordinates.append(("Z", str(row["z"])))
-    widths = [max(len(label), len(value)) for label, value in coordinates]
-    labels = "   ".join(
-        label.ljust(width) for (label, _), width in zip(coordinates, widths)
-    ).rstrip()
-    values = "   ".join(
-        value.ljust(width) for (_, value), width in zip(coordinates, widths)
-    ).rstrip()
+        coordinates.append(f"**Y** `{row['y']}`")
+    coordinates.append(f"**Z** `{row['z']}`")
     desc = (
         f"{clean(row['dimension'])} · {clean(row['category'])}"
-        f"\n```\n{labels}\n{values}\n```"
+        "\nКоординаты: " + " · ".join(coordinates)
     )
     if row["description"]:
         desc += "\n\n" + clean(row["description"])
