@@ -75,6 +75,10 @@ async def say(i, text="", *, embed=None, view=None, files=None):
             return await i.edit_original_response(**kwargs)
         return await i.response.edit_message(**kwargs)
     kwargs["ephemeral"] = True
+    # Webhook.send rejects an explicit None view. Editing above must keep
+    # view=None, however, to remove the previous screen's controls.
+    if view is None:
+        kwargs.pop("view")
     if files:
         kwargs["files"] = files
     if i.response.is_done():

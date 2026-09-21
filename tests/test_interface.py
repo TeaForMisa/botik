@@ -103,9 +103,24 @@ class InterfaceTests(unittest.IsolatedAsyncioTestCase):
         await say(interaction, "Следующий экран")
         interaction.response.edit_message.assert_awaited_once()
         interaction.response.send_message.assert_not_awaited()
+        self.assertIsNone(interaction.response.edit_message.call_args.kwargs["view"])
         self.assertEqual(
             interaction.response.edit_message.call_args.kwargs["attachments"], []
         )
+
+    async def test_deferred_report_omits_none_view(self):
+        self.i.response.is_done = lambda: True
+
+        async def webhook_send(**kwargs):
+            if "view" in kwargs and not isinstance(kwargs["view"], discord.ui.View):
+                raise TypeError("expected view parameter to be of type View")
+
+        self.i.followup.send.side_effect = webhook_send
+        await say(self.i, embed=discord.Embed(title="Проверка настроек"))
+        self.assertNotIn("view", self.i.followup.send.call_args.kwargs)
+        view = PanelView(self.bot)
+        await say(self.i, view=view)
+        self.assertIs(self.i.followup.send.call_args.kwargs["view"], view)
 
     async def test_public_panel_opens_a_new_private_message(self):
         interaction = SimpleNamespace(
