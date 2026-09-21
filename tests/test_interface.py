@@ -12,6 +12,7 @@ import discord
 from bot.config import Settings
 from bot.interface import (
     object_for,
+    place_card,
     project_card,
     poll_card,
     list_objects,
@@ -287,6 +288,22 @@ class InterfaceTests(unittest.IsolatedAsyncioTestCase):
         await create_place(self.bot, self.i, "author")
         args = self.check_screen()
         self.assertIn("Только я", args["embed"].description)
+
+    async def test_place_card_splits_coordinates_into_columns(self):
+        two_coordinates = await self.bot.db.create_place(
+            10, "Портал", "Незер", 7351, 0, 4734, "", "Портал", "clan", 42,
+            y_is_set=False,
+        )
+        embed = place_card(await self.bot.db.get_place(two_coordinates))
+        self.assertEqual(
+            [(field.name, field.value) for field in embed.fields],
+            [("X", "`7351`"), ("Z", "`4734`")],
+        )
+
+        embed = place_card(await self.bot.db.get_place(self.place))
+        self.assertEqual(
+            [field.name for field in embed.fields], ["X", "Y", "Z"]
+        )
 
     async def test_create_place_asks_for_category(self):
         await create_place_category(self.bot, self.i, "clan", "Незер")

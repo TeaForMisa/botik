@@ -335,7 +335,14 @@ async def project_location(bot, row):
             or place["guild_id"] != row["guild_id"]
         ):
             return "Связанное место недоступно. Организатор может выбрать другое."
-        return f"{clean(place['name'])} · {clean(place['dimension'])}\n`{place_coordinates(place)}`"
+        coordinates = [f"**X:** `{place['x']}`"]
+        if place["y_is_set"]:
+            coordinates.append(f"**Y:** `{place['y']}`")
+        coordinates.append(f"**Z:** `{place['z']}`")
+        return (
+            f"{clean(place['name'])} · {clean(place['dimension'])}\n"
+            + " · ".join(coordinates)
+        )
     return " · ".join(clean(x) for x in (row["dimension"], row["coordinates"]) if x)
 
 
@@ -423,12 +430,17 @@ async def sync_place(bot, oid):
 
 
 def place_card(row):
-    desc = f"{clean(row['dimension'])} · {clean(row['category'])}\n`{place_coordinates(row)}`"
+    desc = f"{clean(row['dimension'])} · {clean(row['category'])}"
     if row["description"]:
         desc += "\n\n" + clean(row["description"])
     if row["visibility"] != "clan":
         desc += "\n\nДоступ: " + ACCESS[row["visibility"]]
-    return card("📍 " + row["name"], desc, f"Место #{row['id']}")
+    embed = card("📍 " + row["name"], desc, f"Место #{row['id']}")
+    embed.add_field(name="X", value=f"`{row['x']}`", inline=True)
+    if row["y_is_set"]:
+        embed.add_field(name="Y", value=f"`{row['y']}`", inline=True)
+    embed.add_field(name="Z", value=f"`{row['z']}`", inline=True)
+    return embed
 
 
 async def changed(bot, i, kind, row, fields):
