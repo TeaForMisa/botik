@@ -148,7 +148,9 @@ class HubCog(commands.Cog):
     async def vote_channel(self, i: discord.Interaction, channel: discord.TextChannel):
         settings = await self.bot.db.get_guild_settings(i.guild_id)
         if not settings:
-            return await say(i, "Сначала выполните /setup.")
+            return await say(
+                i, "Сначала настройте каналы: /admin → «Каналы и руководство»."
+            )
         await self.bot.db.execute(
             "UPDATE guild_settings SET votes_channel_id=? WHERE guild_id=?",
             (channel.id, i.guild_id),
@@ -227,7 +229,7 @@ class HubCog(commands.Cog):
         await start(i)
         settings = await self.bot.db.get_guild_settings(i.guild_id)
         if not settings:
-            return await say(i, "Сервер не настроен: /setup.")
+            return await say(i, "Сервер не настроен: /admin → «Каналы и руководство».")
         bot_member = i.guild.me
         if bot_member is None and self.bot.user is not None:
             bot_member = i.guild.get_member(self.bot.user.id)
@@ -235,7 +237,9 @@ class HubCog(commands.Cog):
                 try:
                     bot_member = await i.guild.fetch_member(self.bot.user.id)
                 except discord.HTTPException:
-                    logging.exception("Не удалось получить участника бота для диагностики")
+                    logging.exception(
+                        "Не удалось получить участника бота для диагностики"
+                    )
         lines = []
         for key, label in [
             ("projects_channel_id", "Проекты"),
@@ -301,7 +305,7 @@ class HubCog(commands.Cog):
             embed=card(
                 "🔧 Проверка настроек",
                 "\n".join(lines),
-                "Исправьте предупреждения и запустите /diagnose ещё раз.",
+                "Исправьте предупреждения и запустите проверку ещё раз.",
             ),
         )
 

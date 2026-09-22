@@ -6,6 +6,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.interface import say
 from bot.common import ACCESS_LEVELS, require_access, send_audit
 
 
@@ -47,10 +48,9 @@ class AccessCog(
             level.value,
             interaction.user.id,
         )
-        await interaction.response.send_message(
+        await say(
+            interaction,
             f"Для {role.mention} установлен уровень: **{ACCESS_LEVELS[level.value]}**.",
-            ephemeral=True,
-            allowed_mentions=discord.AllowedMentions.none(),
         )
         await send_audit(
             self.bot,
@@ -72,10 +72,9 @@ class AccessCog(
         if not interaction.guild:
             return
         await self.bot.db.remove_role_access(interaction.guild.id, role.id)
-        await interaction.response.send_message(
+        await say(
+            interaction,
             f"Для {role.mention} удалено особое правило. Будет действовать обычный доступ.",
-            ephemeral=True,
-            allowed_mentions=discord.AllowedMentions.none(),
         )
         await send_audit(
             self.bot,
@@ -93,22 +92,24 @@ class AccessCog(
             return
         rules = await self.bot.db.get_role_access_rules(interaction.guild.id)
         if not rules:
-            await interaction.response.send_message(
+            await say(
+                interaction,
                 "Особых правил пока нет. Ботом могут пользоваться только администраторы сервера.",
-                ephemeral=True,
             )
             return
 
         lines = []
         for rule in rules:
             role = interaction.guild.get_role(rule["role_id"])
-            role_text = role.mention if role else f"Удалённая роль (`{rule['role_id']}`)"
+            role_text = (
+                role.mention if role else f"Удалённая роль (`{rule['role_id']}`)"
+            )
             lines.append(f"{role_text} — **{ACCESS_LEVELS[rule['access_level']]}**")
-        await interaction.response.send_message(
-            "**Доступ к боту**\n" + "\n".join(lines) +
-            "\n\nЕсли у участника несколько настроенных ролей, действует самая высокая роль в списке Discord. Роли без правила не дают доступа.",
-            ephemeral=True,
-            allowed_mentions=discord.AllowedMentions.none(),
+        await say(
+            interaction,
+            "**Доступ к боту**\n"
+            + "\n".join(lines)
+            + "\n\nЕсли у участника несколько настроенных ролей, действует самая высокая роль в списке Discord. Роли без правила не дают доступа.",
         )
 
 

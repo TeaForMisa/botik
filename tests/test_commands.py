@@ -69,7 +69,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(len(form.children), 1)
         self.assertEqual(form.inputs["name"].default, "Дом")
-        image = ImageForm(self.bot, 20, "project", {"id": 1})
+        image = ImageForm(self.bot, 20, "project", {"id": 1, "image_url": None})
         self.assertEqual(len(image.children), 1)
         self.assertIsInstance(image.upload, discord.ui.FileUpload)
 
@@ -104,7 +104,9 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_panel_has_five_equal_sections(self):
         view = PanelView(self.bot)
-        self.assertTrue(all(isinstance(item, discord.ui.Button) for item in view.children))
+        self.assertTrue(
+            all(isinstance(item, discord.ui.Button) for item in view.children)
+        )
         self.assertEqual(len(view.to_components()), 1)
         self.assertEqual(
             {item.custom_id for item in view.children},

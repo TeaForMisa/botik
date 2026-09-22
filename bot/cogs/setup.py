@@ -6,6 +6,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.interface import say, start
 from bot.common import bot_access_check, send_audit, PROJECT_STATUSES
 
 
@@ -34,11 +35,11 @@ class SetupCog(commands.Cog):
     ) -> None:
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
             return
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await start(interaction)
         if len({projects_channel.id, places_channel.id, log_channel.id}) != 3:
-            await interaction.followup.send(
+            await say(
+                interaction,
                 "Выберите три разных канала: проекты, места и закрытый журнал.",
-                ephemeral=True,
             )
             return
         for channel in (projects_channel, places_channel, log_channel):
@@ -50,11 +51,11 @@ class SetupCog(commands.Cog):
                 and permissions.attach_files
                 and permissions.read_message_history
             ):
-                await interaction.followup.send(
+                await say(
+                    interaction,
                     f"Боту не хватает прав в {channel.mention}. Нужны: просмотр "
                     "канала, отправка сообщений, встраивание ссылок, прикрепление "
                     "файлов и чтение истории.",
-                    ephemeral=True,
                 )
                 return
         await self.bot.db.save_guild_settings(
@@ -76,13 +77,13 @@ class SetupCog(commands.Cog):
             except discord.HTTPException:
                 # Creating forum tags needs Manage Channels; bot otherwise works without it.
                 pass
-        await interaction.followup.send(
+        await say(
+            interaction,
             "Настройка сохранена.\n"
             f"Проекты: {projects_channel.mention}\n"
             f"Места: {places_channel.mention}\n"
             f"Журнал: {log_channel.mention}\n"
             f"Руководство: {leadership_role.mention if leadership_role else 'пользователи с правом «Управлять сервером»'}",
-            ephemeral=True,
         )
         await send_audit(
             self.bot,
@@ -102,14 +103,14 @@ class SetupCog(commands.Cog):
             return
         settings = await self.bot.db.get_guild_settings(interaction.guild.id)
         if not settings:
-            await interaction.response.send_message(
-                "Бот запущен, но сервер ещё не настроен. Используйте `/setup`.",
-                ephemeral=True,
+            await say(
+                interaction,
+                "Бот запущен, но сервер ещё не настроен. Откройте /admin → «Каналы и руководство».",
             )
             return
-        await interaction.response.send_message(
+        await say(
+            interaction,
             f"Бот работает. Задержка: {round(self.bot.latency * 1000)} мс.",
-            ephemeral=True,
         )
 
 

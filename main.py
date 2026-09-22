@@ -29,6 +29,7 @@ class ClanBot(commands.Bot):
         from bot.cogs.projects import ProjectsCog
         from bot.cogs.setup import SetupCog
         from bot.cogs.hub import HubCog
+        from bot.cogs.admin import AdminCog, simplify_commands
         from bot.interface import PanelView, PlaceView, PollView
 
         await self.add_cog(SetupCog(self))
@@ -36,6 +37,8 @@ class ClanBot(commands.Bot):
         await self.add_cog(ProjectsCog(self))
         await self.add_cog(PlacesCog(self))
         await self.add_cog(HubCog(self))
+        await self.add_cog(AdminCog(self))
+        simplify_commands(self)
         self.add_view(PanelView(self))
 
         for project in await self.db.fetchall(
@@ -57,14 +60,14 @@ class ClanBot(commands.Bot):
             self.add_view(PollView(self, poll["id"]), message_id=poll["message_id"])
         self.refresh_on_ready = True
 
+        # Replace old global commands even when using a test-guild sync.
+        synced = await self.tree.sync()
+        logging.info("Синхронизировано глобальных команд: %s", len(synced))
         if self.settings.sync_guild_id:
             guild = discord.Object(id=self.settings.sync_guild_id)
             self.tree.copy_global_to(guild=guild)
             synced = await self.tree.sync(guild=guild)
             logging.info("Синхронизировано команд на тестовом сервере: %s", len(synced))
-        else:
-            synced = await self.tree.sync()
-            logging.info("Синхронизировано глобальных команд: %s", len(synced))
 
     async def close(self) -> None:
         if self.get_cog("HubCog"):

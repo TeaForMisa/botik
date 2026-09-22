@@ -32,6 +32,11 @@ from bot.interface import (
     confirm,
     profiles_list,
     say,
+    object_search,
+    material_list,
+    my_promises,
+    text_editor,
+    location_menu,
 )
 from bot.cogs.hub import HubCog
 from main import ClanBot
@@ -223,21 +228,17 @@ class InterfaceTests(unittest.IsolatedAsyncioTestCase):
         # Don't start the background loop in this offline test.
         with patch.object(HubCog, "cog_load", new=AsyncMock()):
             await self.bot.add_cog(hub)
+        from bot.cogs.admin import AdminCog, simplify_commands
+        from bot.cogs.setup import SetupCog
+        from bot.cogs.access import AccessCog
+        from bot.cogs.places import PlacesCog
+        from bot.cogs.projects import ProjectsCog
+
+        for cls in (AdminCog, SetupCog, AccessCog, PlacesCog, ProjectsCog):
+            await self.bot.add_cog(cls(self.bot))
+        simplify_commands(self.bot)
         names = {command.name for command in self.bot.tree.get_commands()}
-        self.assertTrue(
-            {
-                "menu",
-                "panel",
-                "votes",
-                "profile",
-                "people",
-                "material",
-                "diagnose",
-                "backup",
-                "places-refresh",
-            }
-            <= names
-        )
+        self.assertEqual(names, {"menu", "admin"})
         for command in self.bot.tree.get_commands():
             payload = command.to_dict(self.bot.tree)
             self.assertLessEqual(len(payload.get("options", [])), 25)
@@ -333,23 +334,27 @@ class InterfaceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(embed.fields, [])
 
         embed = place_card(await self.bot.db.get_place(self.place))
-        self.assertIn(
-            "🧭 **X** `1` · **Y** `0` · **Z** `2`", embed.description
-        )
+        self.assertIn("🧭 **X** `1` · **Y** `0` · **Z** `2`", embed.description)
 
     async def test_create_place_asks_for_category(self):
         await create_place_category(self.bot, self.i, "clan", "Незер")
         args = self.check_screen()
         self.assertIn("Незер", args["embed"].description)
         select = next(
-            item for item in args["view"].children if isinstance(item, discord.ui.Select)
+            item
+            for item in args["view"].children
+            if isinstance(item, discord.ui.Select)
+            and item.placeholder == "Выберите категорию"
         )
         self.assertEqual(
             [option.label for option in select.options],
             ["База", "Ферма", "Склад", "Трейдхолл", "Другое"],
         )
         self.assertTrue(
-            any(getattr(item, "label", None) == "Назад" for item in args["view"].children)
+            any(
+                getattr(item, "label", None) == "К списку"
+                for item in args["view"].children
+            )
         )
 
     async def test_image_can_be_added_when_place_did_not_have_one(self):
@@ -371,15 +376,15 @@ class InterfaceTests(unittest.IsolatedAsyncioTestCase):
         saved = await self.bot.db.get_place(self.place)
         self.assertTrue(saved["image_url"].startswith("local:"))
         image_path = (
-            self.bot.db.path.parent / "media" / saved["image_url"].removeprefix("local:")
+            self.bot.db.path.parent
+            / "media"
+            / saved["image_url"].removeprefix("local:")
         )
         self.assertEqual(image_path.suffix, ".png")
         self.assertEqual(image_path.read_bytes(), image_data)
         sent = self.i.response.send_message.call_args.kwargs
         self.assertEqual(len(sent["files"]), 1)
-        self.assertEqual(
-            sent["embed"].image.url, "attachment://" + image_path.name
-        )
+        self.assertEqual(sent["embed"].image.url, "attachment://" + image_path.name)
         sent["files"][0].close()
 
     async def test_confirmation_does_not_execute_twice(self):
@@ -450,3 +455,225 @@ class InterfaceTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(self.bot, "get_channel", return_value=channel):
             with self.assertRaises(ValueError):
                 await object_for(self.bot, self.i, "project", self.project)
+
+    def button(self, label):
+        view = self.check_screen()["view"]
+        return next(x for x in view.children if getattr(x, "label", None) == label)
+
+    def select(self, placeholder):
+        return next(
+            x
+            for x in self.check_screen()["view"].children
+            if isinstance(x, discord.ui.Select) and x.placeholder == placeholder
+        )
+
+    async def test_creation_preserves_choices_and_requires_category(self):
+        await create_place(self.bot, self.i)
+        self.assertTrue(self.button("Далее").disabled)
+        select = self.select("Выберите категорию")
+        select._values = ["Ферма"]
+        await select.callback(self.i)
+        select = self.select("Измерение")
+        select._values = ["Энд"]
+        await select.callback(self.i)
+        select = self.select("Кто видит место")
+        select._values = ["author"]
+        await select.callback(self.i)
+        await self.button("Далее").callback(self.i)
+        form = self.i.response.send_modal.call_args.args[0]
+        await form.saved(
+            self.i, {"name": "Новая ферма", "coordinates": "40 -20", "description": ""}
+        )
+        row = await self.bot.db.fetchone(
+            "SELECT * FROM places WHERE name='Новая ферма'"
+        )
+        self.assertEqual(
+            (row["dimension"], row["category"], row["visibility"], row["y_is_set"]),
+            ("Энд", "Ферма", "author", 0),
+        )
+        self.assertIsNone(row["message_id"])
+        self.assertNotIn(
+            "Опубликовать",
+            [getattr(x, "label", None) for x in self.check_screen()["view"].children],
+        )
+
+    async def test_search_edit_return_preserves_filters_and_page(self):
+        for n in range(27):
+            await self.bot.db.create_place(
+                10, f"Точка {n}", "Незер", n, 0, n, "", "Ферма", "author", 42
+            )
+        await list_objects(
+            self.bot,
+            self.i,
+            "place",
+            page=1,
+            query="Точка",
+            category="Ферма",
+            dimension="Незер",
+        )
+        select = self.select("Открыть место")
+        self.assertEqual(len(select.options), 2)
+        oid = select.options[0].value
+        self.assertNotIn(
+            select.options[0].label, self.check_screen()["embed"].description
+        )
+        select._values = [oid]
+        await select.callback(self.i)
+        await self.button("Изменить").callback(self.i)
+        form = self.i.response.send_modal.call_args.args[0]
+        await form.saved(
+            self.i,
+            {"name": "Точка изменена", "coordinates": "8 9", "description": "Описание"},
+        )
+        row = await self.bot.db.get_place(int(oid))
+        self.assertEqual((row["x"], row["z"], row["y_is_set"]), (8, 9, 0))
+        await self.button("К списку").callback(self.i)
+        args = self.check_screen()
+        self.assertIn("2/2", args["embed"].footer.text)
+        self.assertIn("Точка · Ферма · Незер", args["embed"].description)
+        self.assertEqual(len(self.select("Открыть место").options), 2)
+
+    async def test_search_cancel_keeps_original_page(self):
+        back = AsyncMock()
+        await object_search(self.bot, self.i, "place", query="Дом", cancel_to=back)
+        selected = self.select("Измерение")
+        selected._values = ["Незер"]
+        await selected.callback(self.i)
+        await self.button("Назад").callback(self.i)
+        back.assert_awaited_once_with(self.i)
+
+    async def test_delete_cancel_returns_to_management_without_mutation(self):
+        back = AsyncMock()
+        await management(self.bot, self.i, "place", self.place, back_to=back)
+        selected = self.select("Другие действия…")
+        selected._values = ["delete"]
+        await selected.callback(self.i)
+        await self.button("Отмена").callback(self.i)
+        self.assertTrue(self.check_screen()["embed"].title.startswith("Настройки"))
+        row = await self.bot.db.get_place(self.place)
+        self.assertFalse(row["is_deleted"])
+        await self.button("Назад").callback(self.i)
+        await self.button("К списку").callback(self.i)
+        back.assert_awaited_once()
+
+    async def test_dimension_change_does_not_require_coordinates_again(self):
+        await location_menu(
+            self.bot, self.i, "place", await self.bot.db.get_place(self.place)
+        )
+        select = self.select("Выберите измерение")
+        select._values = ["Энд"]
+        await select.callback(self.i)
+        self.i.response.send_modal.assert_not_awaited()
+        row = await self.bot.db.get_place(self.place)
+        self.assertEqual((row["dimension"], row["x"], row["z"]), ("Энд", 1, 2))
+
+    async def test_deleted_places_show_only_manageable_records(self):
+        other = await self.bot.db.create_place(
+            10, "Чужое удалённое", "Незер", 1, 0, 2, "", "База", "clan", 99
+        )
+        await self.bot.db.soft_delete_place(other)
+        await self.bot.db.soft_delete_place(self.place)
+        await list_objects(self.bot, self.i, "place", mode="deleted", origin="mine")
+        self.assertEqual(
+            [x.value for x in self.select("Открыть место").options], [str(self.place)]
+        )
+
+    async def test_material_contribution_actions_and_return(self):
+        mid = await self.bot.db.execute(
+            "INSERT INTO materials(project_id,name,target,stack) VALUES (?,?,?,?)",
+            (self.project, "Бетон", 100, 64),
+        )
+        back = AsyncMock()
+        await material_details(self.bot, self.i, mid, back_to=back)
+        labels = [
+            getattr(x, "label", None) for x in self.check_screen()["view"].children
+        ]
+        self.assertIn("Принесу", labels)
+        self.assertIn("Доставил", labels)
+        self.assertNotIn("Мой вклад", labels)
+        self.assertNotIn("Исправить доставку", labels)
+        await self.bot.db.execute(
+            "INSERT INTO contributions VALUES (?,?,?,?)", (mid, 42, 20, 30)
+        )
+        await material_details(self.bot, self.i, mid, back_to=back)
+        await self.button("Мой вклад").callback(self.i)
+        self.button("Исправить доставку")
+        await self.button("Снять обещание").callback(self.i)
+        await self.button("Отмена").callback(self.i)
+        own = await self.bot.db.fetchone(
+            "SELECT * FROM contributions WHERE material_id=? AND user_id=42", (mid,)
+        )
+        self.assertEqual((own["promised"], own["delivered"]), (20, 30))
+        await self.button("К материалу").callback(self.i)
+        await self.button("К списку").callback(self.i)
+        back.assert_awaited_once()
+
+    async def test_project_material_navigation_preserves_project_origin(self):
+        back = AsyncMock()
+        await project_details(self.bot, self.i, self.project, back_to=back)
+        await self.button("Материалы").callback(self.i)
+        await self.button("Назад").callback(self.i)
+        await self.button("К списку").callback(self.i)
+        back.assert_awaited_once()
+
+    async def test_promises_open_material_without_id_command(self):
+        mid = await self.bot.db.execute(
+            "INSERT INTO materials(project_id,name,target,stack) VALUES (?,?,?,?)",
+            (self.project, "Бетон", 100, 64),
+        )
+        await self.bot.db.execute(
+            "INSERT INTO contributions VALUES (?,?,?,?)", (mid, 42, 20, 0)
+        )
+        await my_promises(self.bot, self.i)
+        select = self.select("Открыть материал")
+        select._values = [str(mid)]
+        await select.callback(self.i)
+        self.button("Доставил")
+        await self.button("К списку").callback(self.i)
+        self.assertEqual(self.check_screen()["embed"].title, "Обещанные ресурсы")
+
+    async def test_admin_screens_fit_and_actions_recheck_permissions(self):
+        from bot.cogs.admin import (
+            admin_home,
+            setup_screen,
+            access_screen,
+            maintenance_screen,
+            run_action,
+        )
+        from bot.common import BotAccessDenied
+
+        with patch("bot.cogs.admin.require_access", new=AsyncMock(return_value=True)):
+            for screen in (admin_home, setup_screen, access_screen, maintenance_screen):
+                await screen(self.bot, self.i)
+                self.check_screen()
+        with patch(
+            "bot.cogs.admin.require_access",
+            new=AsyncMock(side_effect=BotAccessDenied("Отозван доступ")),
+        ):
+            with self.assertRaises(BotAccessDenied):
+                await run_action(self.bot, self.i, "HubCog", "backup")
+
+    async def test_category_search_respects_privacy_and_discord_limit(self):
+        for n in range(30):
+            await self.bot.db.create_place(
+                10, f"Место {n}", "Незер", 1, 0, 2, "", f"Категория {n}", "clan", 42
+            )
+        await self.bot.db.create_place(
+            10, "Секрет", "Незер", 1, 0, 2, "", "Секретная категория", "author", 99
+        )
+        await object_search(self.bot, self.i, "place", category="Категория 29")
+        options = self.select("Категория").options
+        self.assertLessEqual(len(options), 25)
+        self.assertNotIn("Секретная категория", [x.label for x in options])
+        self.assertTrue(any(x.label == "Категория 29" and x.default for x in options))
+        self.button("Другая категория")
+
+    async def test_admin_reports_keep_a_return_button(self):
+        from bot.cogs.admin import run_action
+
+        with patch.object(HubCog, "cog_load", new=AsyncMock()):
+            await self.bot.add_cog(HubCog(self.bot))
+        self.i.extras = {}
+        with patch("bot.cogs.admin.require_access", new=AsyncMock(return_value=True)):
+            await run_action(self.bot, self.i, "HubCog", "diagnose")
+        self.button("Назад")
